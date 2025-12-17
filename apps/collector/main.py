@@ -12,10 +12,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from dotenv import load_dotenv
+
 from src.application.use_cases.log_telegram_message import LogTelegramMessageUseCase
 from src.infrastructure.telegram_client.collector_client import TelegramCollectorClient
 
 DEFAULT_SESSION_NAME = "pulsedidgest"
+DOTENV_PATH = PROJECT_ROOT / ".env"
 
 
 @dataclass
@@ -45,6 +48,10 @@ def load_settings() -> CollectorSettings:
     )
 
 
+def load_env_file() -> None:
+    load_dotenv(dotenv_path=DOTENV_PATH)
+
+
 def _require_env(var_name: str) -> str:
     value = os.getenv(var_name)
     if not value:
@@ -69,6 +76,7 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+    load_env_file()
     settings = load_settings()
     try:
         asyncio.run(run_collector(settings))
