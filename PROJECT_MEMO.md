@@ -6,6 +6,7 @@
 - Application — use cases
 - Infrastructure — Telegram, Gemini, БД
 - Interface — форматирование и доставка сообщений
+- Для collector выбран Telethon
 
 ## Почему так
 - Минимальная связанность
