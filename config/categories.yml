@@ -1,0 +1,16 @@
+categories:
+  - name: default_jobs
+    prompt: |
+      Act as a Telegram jobs filter for Berlin tech professionals.
+      Return JSON {"pass": bool, "score": 0-1, "reason": "short"} telling if the message is a relevant job post.
+    groups:
+      - -1001234567890
+    prefilter:
+      min_length: 30
+      include_any:
+        - job
+        - vacancy
+        - hiring
+      exclude_any:
+        - crypto
+        - giveaway

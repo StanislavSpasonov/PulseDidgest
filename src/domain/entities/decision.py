@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class DecisionRecord:
+    category_id: str
     model: str
     prompt_name: str
     prompt_version: str

@@ -14,6 +14,7 @@
 - Telegram collector: receive messages from one group — Telethon collector выводит новые сообщения в stdout
 - Gemini filter (MVP) — сообщения проходят через Gemini и логируется решение pass/score/reason
 - Database layer: persist messages and decisions — PostgreSQL + SQLAlchemy + Alembic
+- Categories & Groups (MVP) — синхронизация категорий/групп, prefilter и логирование llm_errors
 
 ## Next
-- Categories & Groups: prompts and group mapping
+- Delivery Engine (instant/digest)

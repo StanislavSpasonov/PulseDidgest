@@ -5,38 +5,20 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
-from typing import Optional
-
-try:
-    from telethon.events.newmessage import NewMessage
-except ModuleNotFoundError:  # pragma: no cover - telethon not installed locally
-    NewMessage = object  # type: ignore
 
 from src.infrastructure.llm_gemini import GeminiFilterClient
 
-CATEGORY_DESCRIPTION = (
-    "Tech and product job opportunities relevant for Berlin-based professionals."
-)
 PROMPT_NAME = "default"
 PROMPT_VERSION = "v1"
-PROMPT_TEMPLATE = """
-You are PulseDidgest's category filter. Assess the Telegram message below for this category:
-"{category}".
-
+PROMPT_SUFFIX = """
 Return ONLY valid minified JSON in the format:
-{{"pass": true/false, "score": 0.0-1.0, "reason": "short explanation"}}
+{"pass": true/false, "score": 0.0-1.0, "reason": "short explanation"}
 
 Rules:
 - JSON must be the entire response: no markdown, comments, or surrounding text.
 - "score" must always be a float between 0 and 1.
 - Keep "reason" under 120 characters.
 - If the message lacks relevant info, set pass=false with a short reason.
-
-Message:
-<<<
-{message}
->>>
-JSON:
 """
 
 
@@ -51,49 +33,39 @@ class GeminiFilterDecision:
 
 
 class FilterMessageWithGeminiUseCase:
-    """Runs every Telegram message through Gemini and logs the decision."""
+    """Runs message text through Gemini and returns classification."""
 
     def __init__(
         self,
         gemini_client: GeminiFilterClient,
-        logger: Optional[logging.Logger] = None,
+        logger: logging.Logger | None = None,
     ) -> None:
         self._gemini_client = gemini_client
         self._logger = logger or logging.getLogger("collector.gemini_use_case")
 
-    async def handle(self, event: NewMessage.Event) -> Optional[GeminiFilterDecision]:  # type: ignore[name-defined]
-        message = getattr(event, "message", None)
-        if message is None:
-            self._logger.warning("Gemini filter received empty event: %s", event)
-            return None
-
-        text = getattr(message, "message", "") or ""
-        text = text.strip()
-        if not text:
-            self._logger.info("Gemini filter skipped message without text: id=%s", getattr(message, "id", None))
-            return None
-
-        try:
-            decision = await self._classify_text(text)
-        except Exception as exc:  # pragma: no cover - runtime guard
-            self._logger.error("Gemini classification failed: %s", exc)
-            return None
-
+    async def classify(
+        self,
+        message_text: str,
+        category_name: str,
+        category_prompt: str,
+    ) -> GeminiFilterDecision:
+        prompt = self._build_prompt(category_prompt, message_text)
+        raw_response = await asyncio.to_thread(self._gemini_client.generate_json, prompt)
+        decision = self._parse_response(raw_response)
+        decision.prompt_name = category_name
         self._logger.info(
-            '[LLM] pass=%s score=%.2f reason="%s"',
+            '[LLM][category=%s] pass=%s score=%.2f reason="%s"',
+            category_name,
             decision.passed,
             decision.score,
             decision.reason,
         )
         return decision
 
-    async def _classify_text(self, message_text: str) -> GeminiFilterDecision:
-        prompt = PROMPT_TEMPLATE.format(
-            category=CATEGORY_DESCRIPTION,
-            message=message_text,
+    def _build_prompt(self, category_prompt: str, message_text: str) -> str:
+        return (
+            f"{category_prompt}\n\n{PROMPT_SUFFIX}\n\nMessage:\n<<<\n{message_text}\n>>>\nJSON:"
         )
-        raw_response = await asyncio.to_thread(self._gemini_client.generate_json, prompt)
-        return self._parse_response(raw_response)
 
     def _parse_response(self, raw: str) -> GeminiFilterDecision:
         try:

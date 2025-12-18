@@ -42,6 +42,81 @@ class MessageModel(Base):
         back_populates="message",
         cascade="all, delete-orphan",
     )
+    llm_errors = relationship(
+        "LLMErrorModel",
+        back_populates="message",
+        cascade="all, delete-orphan",
+    )
+
+
+class CategoryModel(Base):
+    __tablename__ = "categories"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(Text, nullable=False, unique=True)
+    prompt = Column(Text, nullable=False)
+    is_enabled = Column(Boolean, nullable=False, server_default="true")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    groups = relationship("CategoryGroupModel", cascade="all, delete-orphan")
+    decisions = relationship("DecisionModel", back_populates="category")
+
+
+class SourceGroupModel(Base):
+    __tablename__ = "source_groups"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tg_chat_id = Column(BigInteger, nullable=False, unique=True)
+    title = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    categories = relationship("CategoryGroupModel", cascade="all, delete-orphan")
+
+
+class CategoryGroupModel(Base):
+    __tablename__ = "category_groups"
+    __table_args__ = (
+        UniqueConstraint("category_id", "group_id", name="pk_category_group"),
+    )
+
+    category_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("categories.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    group_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("source_groups.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+
+class LLMErrorModel(Base):
+    __tablename__ = "llm_errors"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    message_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("messages.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    category_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("categories.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    error_code = Column(Text, nullable=False)
+    error_text = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    message = relationship("MessageModel", back_populates="llm_errors")
+    category = relationship("CategoryModel")
 
 
 class DecisionModel(Base):
@@ -53,6 +128,11 @@ class DecisionModel(Base):
         ForeignKey("messages.id", ondelete="CASCADE"),
         nullable=False,
     )
+    category_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("categories.id", ondelete="CASCADE"),
+        nullable=True,
+    )
     model = Column(Text, nullable=False)
     prompt_name = Column(Text, nullable=False, server_default="default")
     prompt_version = Column(Text, nullable=False, server_default="v1")
@@ -62,3 +142,4 @@ class DecisionModel(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     message = relationship("MessageModel", back_populates="decisions")
+    category = relationship("CategoryModel", back_populates="decisions")

@@ -34,6 +34,27 @@ python apps/tools/list_gemini_models.py
 
 Collector использует `DATABASE_URL` во время запуска и сохраняет сообщения + решения Gemini через SQLAlchemy. Для просмотра доступных миграций используйте стандартные команды Alembic (`alembic history`, `alembic downgrade base`).
 
+## Categories & Groups (MVP)
+
+- Редактируйте `config/categories.yml`, задавая категории, промпты и список Telegram chat_id (BigInt) для каждой категории.
+- Пример записи:
+
+        categories:
+          - name: default_jobs
+            prompt: >
+              Текст промпта на натуральном языке
+            groups:
+              - -1001234567890
+            prefilter:
+              min_length: 30
+              include_any: ["job", "hiring"]
+              exclude_any: ["crypto", "giveaway"]
+
+- Collector синхронизирует таблицы `categories`, `source_groups`, `category_groups` при запуске.
+- Проверить содержимое можно через psql: `docker compose exec postgres psql -U pulsedidgest -d pulsedidgest -c 'SELECT name FROM categories;'` и `... -c 'SELECT category_id, group_id FROM category_groups;'`.
+- Prefilter (min_length/include/exclude) выполняется до LLM; пропущенные сообщения логируются как "Prefilter skipped".
+- При ответе Gemini 429 (`RESOURCE_EXHAUSTED`) создаётся запись в `llm_errors`, включается cooldown и сообщения продолжают сохраняться без LLM-вызовов.
+
 ### Переменные окружения
 - `TELEGRAM_API_ID` — API ID Telegram (integer)
 - `TELEGRAM_API_HASH` — соответствующий API hash
@@ -41,4 +62,5 @@ Collector использует `DATABASE_URL` во время запуска и 
 - `TELETHON_SESSION_NAME` — имя файла сессии (опционально, по умолчанию `pulsedidgest`)
 - `GEMINI_API_KEY` — API-ключ Gemini (обязателен для фильтра)
 - `GEMINI_MODEL` — имя модели Gemini (опционально, можно оставить пустым и использовать первую доступную `generateContent`)
+- `GEMINI_COOLDOWN_SECONDS` — пауза после 429 RESOURCE_EXHAUSTED (по умолчанию 60 секунд)
 - `DATABASE_URL` — строка подключения к PostgreSQL (например `postgresql+psycopg://user:password@localhost:5432/pulsedidgest`)
