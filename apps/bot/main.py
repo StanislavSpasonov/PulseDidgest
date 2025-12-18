@@ -72,11 +72,11 @@ async def main() -> None:
         )
         if ensure_admin(message, admin_user_id):
             help_text += (
-                "\nAdmin commands:\n"
-                "/categories, /category_show <name>, /category_create <name>\n"
-                "/category_prompt <name>, /category_debug_on|off <name>\n"
-                "/groups, /group_add\n"
-                "/bind <category> <chat_id>, /unbind <category> <chat_id>\n"
+        "\nAdmin commands:\n"
+        "/categories, /category_show <name>, /category_create <name>\n"
+        "/category_prompt <name>, /category_debug_on|off <name>\n"
+        "/groups, /group_add, /group_add_id <chat_id> [title]\n"
+        "/bind <category> <chat_id>, /unbind <category> <chat_id>\n"
                 "/delivery_show <category>, /delivery_set <category> <chat_id> <mode> [args]\n"
                 "/delivery_enable|disable <category> <chat_id>\n"
                 "/report <category> [hours] [limit]\n"
@@ -257,7 +257,10 @@ async def main() -> None:
     @dp.message(GroupAddStates.waiting_for_forward)
     async def handle_forwarded_group(message: Message, state: FSMContext) -> None:
         if not message.forward_from_chat:
-            await message.answer("Please forward a message from the target group.")
+            await message.answer(
+                "No chat info detected. Forward directly from the target group "
+                "(with content protection disabled) or use /group_add_id <chat_id>"
+            )
             return
         chat = message.forward_from_chat
         await asyncio.to_thread(
@@ -560,3 +563,20 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
+    @dp.message(Command("group_add_id"))
+    async def handle_group_add_id(message: Message) -> None:
+        if not ensure_admin(message, admin_user_id):
+            await message.answer("Admin only")
+            return
+        parts = message.text.split(maxsplit=2)
+        if len(parts) < 2:
+            await message.answer("Usage: /group_add_id <chat_id> [title]")
+            return
+        try:
+            chat_id = int(parts[1])
+        except ValueError:
+            await message.answer("chat_id must be integer")
+            return
+        title = parts[2].strip() if len(parts) > 2 else None
+        await asyncio.to_thread(admin_repo.register_group, chat_id, title)
+        await message.answer(f"Group registered manually: {chat_id}")
