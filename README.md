@@ -26,9 +26,11 @@ python apps/tools/list_gemini_models.py
 
 ## Persistence (PostgreSQL MVP)
 
-1. Создайте БД PostgreSQL (пример): `createdb pulsedidgest`
-2. Обновите `DATABASE_URL` в `.env` (формат `postgresql+psycopg://user:password@host:port/db`)
-3. Примените миграции: `alembic upgrade head`
+1. Поднимите PostgreSQL локально: `docker compose up -d`
+2. Остановите при необходимости: `docker compose down`
+3. Убедитесь, что в `.env` установлена строка `DATABASE_URL=postgresql+psycopg://pulsedidgest:pulsedidgest@localhost:5432/pulsedidgest`
+4. Примените миграции: `alembic upgrade head`
+5. Проверить таблицы: `docker compose exec postgres psql -U pulsedidgest -d pulsedidgest -c '\\dt'`
 
 Collector использует `DATABASE_URL` во время запуска и сохраняет сообщения + решения Gemini через SQLAlchemy. Для просмотра доступных миграций используйте стандартные команды Alembic (`alembic history`, `alembic downgrade base`).
 

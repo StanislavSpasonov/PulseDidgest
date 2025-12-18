@@ -34,3 +34,4 @@ venv/
 *.session
 *.session-journal
 sessions/
+data/postgres/
