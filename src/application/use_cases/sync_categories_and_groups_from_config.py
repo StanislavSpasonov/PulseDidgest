@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Protocol
+from typing import Iterable, List, Protocol
 
 import yaml
 
@@ -14,7 +14,6 @@ from src.domain.entities import (
     DeliveryConfig,
     GroupSyncConfig,
     PrefilterRule,
-    RuntimeCategoryGroup,
 )
 
 
@@ -34,19 +33,10 @@ class CategorySyncRepository(Protocol):
     def upsert_source_group(self, tg_chat_id: int, title: str | None = None) -> str:
         ...
 
-    def sync_category_groups(self, category_id: str, bindings: List[GroupSyncConfig]) -> None:
+    def sync_category_groups(
+        self, category_id: str, bindings: List[CategoryGroupBinding]
+    ) -> None:
         ...
-
-    def load_runtime_registry(self) -> Dict[int, List[RuntimeCategoryGroup]]:
-        ...
-
-
-@dataclass
-class CategoryRegistry:
-    chat_to_categories: Dict[int, List[RuntimeCategoryGroup]]
-
-    def get_categories_for_chat(self, chat_id: int) -> List[RuntimeCategoryGroup]:
-        return self.chat_to_categories.get(chat_id, [])
 
 
 class SyncCategoriesAndGroupsFromConfigUseCase:
@@ -66,10 +56,8 @@ class SyncCategoriesAndGroupsFromConfigUseCase:
         self._default_tz = default_tz
         self._logger = logger or logging.getLogger("collector.category_sync")
 
-    def execute(self) -> CategoryRegistry:
+    def execute(self) -> None:
         self._maybe_seed_from_config()
-        mapping = self._repo.load_runtime_registry()
-        return CategoryRegistry(chat_to_categories=mapping)
 
     def _maybe_seed_from_config(self) -> None:
         if self._config_mode.lower() == "off":

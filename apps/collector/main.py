@@ -188,7 +188,7 @@ async def run_collector(settings: CollectorSettings) -> None:
         default_tz=settings.default_tz,
         logger=logger,
     )
-    category_registry = sync_use_case.execute()
+    sync_use_case.execute()
 
     notifier: UserNotifier | None = None
     bot_sender: TelegramBotSender | None = None
@@ -262,7 +262,9 @@ async def run_collector(settings: CollectorSettings) -> None:
             )
             return
 
-        bindings = category_registry.get_categories_for_chat(chat_id)
+        bindings = await asyncio.to_thread(
+            category_repository.fetch_bindings_for_chat, chat_id
+        )
         if not bindings:
             logger.debug("No categories configured for chat %s", chat_id)
             return
