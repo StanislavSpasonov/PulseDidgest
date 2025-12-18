@@ -55,11 +55,19 @@ Collector использует `DATABASE_URL` во время запуска и 
 - Prefilter (min_length/include/exclude) выполняется до LLM; пропущенные сообщения логируются как "Prefilter skipped".
 - При ответе Gemini 429 (`RESOURCE_EXHAUSTED`) создаётся запись в `llm_errors`, включается cooldown и сообщения продолжают сохраняться без LLM-вызовов.
 
+## Telegram Bot + Instant Delivery (MVP)
+
+1. Создайте бота через BotFather и положите токен в `.env` (`TELEGRAM_BOT_TOKEN`).
+2. Запустите бота: `python apps/bot/main.py` и выполните `/start` из Telegram (бот ответит `Registered. chat_id=...`).
+3. Запустите collector (`python apps/collector/main.py`). Когда Gemini вернёт `pass=true`, решение будет немедленно отправлено всем активным пользователям. В сообщении отображается категория, score и исходный текст.
+4. Проверить доставку можно в БД: `docker compose exec postgres psql -U pulsedidgest -d pulsedidgest -c 'SELECT delivered_at FROM decisions ORDER BY created_at DESC LIMIT 5;'`.
+
 ### Переменные окружения
 - `TELEGRAM_API_ID` — API ID Telegram (integer)
 - `TELEGRAM_API_HASH` — соответствующий API hash
 - `TELEGRAM_SOURCE_CHAT` — username или ID источника
 - `TELETHON_SESSION_NAME` — имя файла сессии (опционально, по умолчанию `pulsedidgest`)
+- `TELEGRAM_BOT_TOKEN` — токен бота для /start и instant-доставки
 - `GEMINI_API_KEY` — API-ключ Gemini (обязателен для фильтра)
 - `GEMINI_MODEL` — имя модели Gemini (опционально, можно оставить пустым и использовать первую доступную `generateContent`)
 - `GEMINI_COOLDOWN_SECONDS` — пауза после 429 RESOURCE_EXHAUSTED (по умолчанию 60 секунд)

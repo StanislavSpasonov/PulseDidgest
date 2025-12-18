@@ -15,7 +15,7 @@ class MessageDecisionRepository(Protocol):
         self,
         message: MessageRecord,
         decision: DecisionRecord,
-    ) -> str:
+    ) -> tuple[str, str]:
         ...
 
     def record_llm_error(
@@ -30,6 +30,9 @@ class MessageDecisionRepository(Protocol):
     def ensure_message(self, message: MessageRecord) -> str:
         ...
 
+    def mark_decision_delivered(self, decision_id: str) -> None:
+        ...
+
 
 class StoreMessageAndDecisionUseCase:
     """Stores a Telegram message and its Gemini decision in persistence."""
@@ -42,7 +45,9 @@ class StoreMessageAndDecisionUseCase:
         self._repository = repository
         self._logger = logger or logging.getLogger("collector.persistence_use_case")
 
-    async def handle(self, message: MessageRecord, decision: DecisionRecord) -> str | None:
+    async def handle(
+        self, message: MessageRecord, decision: DecisionRecord
+    ) -> tuple[str, str] | None:
         try:
             return await asyncio.to_thread(
                 self._repository.save_message_and_decision,
@@ -73,3 +78,11 @@ class StoreMessageAndDecisionUseCase:
         except Exception as exc:  # pragma: no cover
             self._logger.error("Failed to ensure message record: %s", exc)
             return None
+
+    async def mark_delivered(self, decision_id: str) -> None:
+        try:
+            await asyncio.to_thread(
+                self._repository.mark_decision_delivered, decision_id
+            )
+        except Exception as exc:  # pragma: no cover
+            self._logger.error("Failed to mark decision delivered: %s", exc)

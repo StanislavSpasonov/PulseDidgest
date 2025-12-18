@@ -3,6 +3,7 @@
 from .message import MessageRecord
 from .decision import DecisionRecord
 from .category_config import PrefilterRule, RuntimeCategory, CategorySyncConfig
+from .user import UserRecord
 
 __all__ = [
     "MessageRecord",
@@ -10,4 +11,5 @@ __all__ = [
     "PrefilterRule",
     "RuntimeCategory",
     "CategorySyncConfig",
+    "UserRecord",
 ]

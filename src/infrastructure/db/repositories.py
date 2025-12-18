@@ -1,13 +1,13 @@
-"""SQLAlchemy repositories for persisting messages and decisions."""
+"""SQLAlchemy repositories for persistence use cases."""
 from __future__ import annotations
 
 import uuid
 from typing import Callable, List
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from src.domain.entities import DecisionRecord, MessageRecord
+from src.domain.entities import DecisionRecord, MessageRecord, UserRecord
 
 from .models import (
     CategoryGroupModel,
@@ -16,18 +16,19 @@ from .models import (
     LLMErrorModel,
     MessageModel,
     SourceGroupModel,
+    UserModel,
 )
 
 
 class SQLAlchemyMessageDecisionRepository:
-    """Persists messages and related decisions using SQLAlchemy."""
+    """Persists messages, decisions, and related metadata using SQLAlchemy."""
 
     def __init__(self, session_factory: Callable[[], Session]) -> None:
         self._session_factory = session_factory
 
     def save_message_and_decision(
         self, message: MessageRecord, decision: DecisionRecord
-    ) -> str:
+    ) -> tuple[str, str]:
         session = self._session_factory()
         try:
             db_message = self._get_or_create_message(session, message)
@@ -43,7 +44,7 @@ class SQLAlchemyMessageDecisionRepository:
             )
             session.add(db_decision)
             session.commit()
-            return str(db_message.id)
+            return str(db_message.id), str(db_decision.id)
         except Exception:
             session.rollback()
             raise
@@ -76,6 +77,21 @@ class SQLAlchemyMessageDecisionRepository:
                     error_text=error_text,
                 )
             )
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def mark_decision_delivered(self, decision_id: str) -> None:
+        session = self._session_factory()
+        try:
+            stmt = select(DecisionModel).where(DecisionModel.id == uuid.UUID(decision_id))
+            db_decision = session.execute(stmt).scalar_one_or_none()
+            if db_decision is None:
+                return
+            db_decision.delivered_at = func.now()
             session.commit()
         except Exception:
             session.rollback()
@@ -186,5 +202,56 @@ class SQLAlchemyCategoryRepository:
         except Exception:
             session.rollback()
             raise
+        finally:
+            session.close()
+
+
+class SQLAlchemyUserRepository:
+    """Manages Telegram bot users."""
+
+    def __init__(self, session_factory: Callable[[], Session]) -> None:
+        self._session_factory = session_factory
+
+    def register_user(self, tg_user_id: int, chat_id: int, username: str | None) -> str:
+        session = self._session_factory()
+        try:
+            stmt = select(UserModel).where(UserModel.tg_user_id == tg_user_id)
+            user = session.execute(stmt).scalar_one_or_none()
+            if user is None:
+                user = UserModel(
+                    tg_user_id=tg_user_id,
+                    chat_id=chat_id,
+                    username=username,
+                    is_active=True,
+                )
+                session.add(user)
+            else:
+                user.chat_id = chat_id
+                user.username = username
+                user.is_active = True
+            session.commit()
+            return str(user.id)
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def get_active_users(self) -> List[UserRecord]:
+        session = self._session_factory()
+        try:
+            stmt = select(UserModel).where(UserModel.is_active.is_(True))
+            users = session.execute(stmt).scalars().all()
+            return [
+                UserRecord(
+                    id=str(user.id),
+                    tg_user_id=int(user.tg_user_id),
+                    chat_id=int(user.chat_id),
+                    username=user.username,
+                    is_active=user.is_active,
+                    created_at=user.created_at,
+                )
+                for user in users
+            ]
         finally:
             session.close()

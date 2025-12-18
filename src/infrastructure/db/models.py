@@ -119,6 +119,17 @@ class LLMErrorModel(Base):
     category = relationship("CategoryModel")
 
 
+class UserModel(Base):
+    __tablename__ = "users"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tg_user_id = Column(BigInteger, nullable=False, unique=True)
+    chat_id = Column(BigInteger, nullable=False, unique=True)
+    username = Column(Text, nullable=True)
+    is_active = Column(Boolean, nullable=False, server_default="true")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
 class DecisionModel(Base):
     __tablename__ = "decisions"
 
@@ -140,6 +151,7 @@ class DecisionModel(Base):
     score = Column(Float, nullable=False)
     reason = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    delivered_at = Column(DateTime(timezone=True), nullable=True)
 
     message = relationship("MessageModel", back_populates="decisions")
     category = relationship("CategoryModel", back_populates="decisions")

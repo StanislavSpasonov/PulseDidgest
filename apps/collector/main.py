@@ -18,6 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from dotenv import load_dotenv
 
 from src.application.services.prefilter import should_run_llm
+from src.application.use_cases.deliver_instant import DeliverInstantUseCase
 from src.application.use_cases.filter_message_with_gemini import (
     FilterMessageWithGeminiUseCase,
 )
@@ -33,8 +34,10 @@ from src.infrastructure.db.engine import get_session_factory
 from src.infrastructure.db.repositories import (
     SQLAlchemyCategoryRepository,
     SQLAlchemyMessageDecisionRepository,
+    SQLAlchemyUserRepository,
 )
 from src.infrastructure.llm_gemini import GeminiFilterClient
+from src.infrastructure.telegram_bot import TelegramBotSender
 from src.infrastructure.telegram_client.collector_client import TelegramCollectorClient
 
 DEFAULT_SESSION_NAME = "pulsedidgest"
@@ -156,6 +159,20 @@ async def run_collector(settings: CollectorSettings) -> None:
     )
     category_registry = sync_use_case.execute()
     cooldown = GeminiCooldownManager(settings.gemini_cooldown_seconds)
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    delivery_use_case: DeliverInstantUseCase | None = None
+    bot_sender: TelegramBotSender | None = None
+    if bot_token:
+        user_repository = SQLAlchemyUserRepository(session_factory=session_factory)
+        bot_sender = TelegramBotSender(bot_token)
+        delivery_use_case = DeliverInstantUseCase(
+            user_repository=user_repository,
+            decision_repository=message_repository,
+            sender=bot_sender,
+            logger=logger,
+        )
+    else:
+        logger.info("TELEGRAM_BOT_TOKEN not set; instant delivery disabled")
 
     async def handle_event(event):
         await log_use_case.handle(event)
@@ -271,9 +288,23 @@ async def run_collector(settings: CollectorSettings) -> None:
                 score=decision.score,
                 reason=decision.reason,
             )
-            await store_use_case.handle(message_record, decision_record)
+            save_result = await store_use_case.handle(message_record, decision_record)
+            if not save_result:
+                continue
+            _, decision_db_id = save_result
+            if decision_record.passed and delivery_use_case:
+                await delivery_use_case.deliver(
+                    decision_db_id,
+                    decision_record,
+                    category.name,
+                    message_text,
+                )
 
-    await client.run(settings.source_chat, handle_event)
+    try:
+        await client.run(settings.source_chat, handle_event)
+    finally:
+        if bot_sender is not None:
+            await bot_sender.close()
 
 
 def main() -> None:

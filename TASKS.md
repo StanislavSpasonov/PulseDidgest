@@ -15,6 +15,7 @@
 - Gemini filter (MVP) — сообщения проходят через Gemini и логируется решение pass/score/reason
 - Database layer: persist messages and decisions — PostgreSQL + SQLAlchemy + Alembic
 - Categories & Groups (MVP) — синхронизация категорий/групп, prefilter и логирование llm_errors
+- Telegram Bot + Instant Delivery (MVP) — /start-регистрация и отправка pass=True решений пользователям
 
 ## Next
-- Delivery Engine (instant/digest)
+- Digest delivery engine
