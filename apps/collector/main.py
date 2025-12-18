@@ -17,6 +17,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from dotenv import load_dotenv
 
+from src.application.services.digest_engine import DigestDeliveryEngine
+from src.application.services.notifier import DebugThrottle, UserNotifier
 from src.application.services.prefilter import should_run_llm
 from src.application.use_cases.deliver_instant import DeliverInstantUseCase
 from src.application.use_cases.filter_message_with_gemini import (
@@ -33,6 +35,7 @@ from src.domain.entities import DecisionRecord, MessageRecord
 from src.infrastructure.db.engine import get_session_factory
 from src.infrastructure.db.repositories import (
     SQLAlchemyCategoryRepository,
+    SQLAlchemyDeliveryRepository,
     SQLAlchemyMessageDecisionRepository,
     SQLAlchemyUserRepository,
 )
@@ -54,6 +57,11 @@ class CollectorSettings:
     gemini_api_key: str
     gemini_model: str | None
     gemini_cooldown_seconds: int
+    bot_token: str | None
+    admin_user_id: int | None
+    default_tz: str
+    config_sync_mode: str
+    delivery_tick_seconds: int
 
 
 class GeminiCooldownManager:
@@ -93,6 +101,11 @@ def load_settings() -> CollectorSettings:
     gemini_api_key = _require_env("GEMINI_API_KEY")
     gemini_model = os.getenv("GEMINI_MODEL") or None
     cooldown_raw = os.getenv("GEMINI_COOLDOWN_SECONDS", "60")
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    admin_user_id = os.getenv("TELEGRAM_ADMIN_USER_ID")
+    default_tz = os.getenv("DEFAULT_TZ", "Europe/Berlin")
+    config_mode = os.getenv("CONFIG_SYNC_MODE", "seed_if_empty")
+    delivery_tick_raw = os.getenv("DELIVERY_TICK_SECONDS", "60")
     _require_env("DATABASE_URL")
 
     try:
@@ -105,6 +118,18 @@ def load_settings() -> CollectorSettings:
     except ValueError as exc:  # pragma: no cover
         raise ValueError("GEMINI_COOLDOWN_SECONDS must be an integer") from exc
 
+    admin_user_id_int = None
+    if admin_user_id:
+        try:
+            admin_user_id_int = int(admin_user_id)
+        except ValueError as exc:
+            raise ValueError("TELEGRAM_ADMIN_USER_ID must be an integer") from exc
+
+    try:
+        delivery_tick_seconds = max(15, int(delivery_tick_raw))
+    except ValueError as exc:
+        raise ValueError("DELIVERY_TICK_SECONDS must be an integer") from exc
+
     return CollectorSettings(
         api_id=api_id_int,
         api_hash=api_hash,
@@ -113,6 +138,11 @@ def load_settings() -> CollectorSettings:
         gemini_api_key=gemini_api_key,
         gemini_model=gemini_model,
         gemini_cooldown_seconds=cooldown_seconds,
+        bot_token=bot_token,
+        admin_user_id=admin_user_id_int,
+        default_tz=default_tz,
+        config_sync_mode=config_mode,
+        delivery_tick_seconds=delivery_tick_seconds,
     )
 
 
@@ -129,6 +159,7 @@ def _require_env(var_name: str) -> str:
 
 async def run_collector(settings: CollectorSettings) -> None:
     logger = logging.getLogger("collector")
+    session_factory = get_session_factory()
     client = TelegramCollectorClient(
         api_id=settings.api_id,
         api_hash=settings.api_hash,
@@ -145,34 +176,54 @@ async def run_collector(settings: CollectorSettings) -> None:
         gemini_client=gemini_client,
         logger=logger,
     )
-    session_factory = get_session_factory()
     message_repository = SQLAlchemyMessageDecisionRepository(session_factory=session_factory)
+    category_repository = SQLAlchemyCategoryRepository(session_factory=session_factory)
+    delivery_repository = SQLAlchemyDeliveryRepository(session_factory=session_factory)
+    user_repository = SQLAlchemyUserRepository(session_factory=session_factory)
+
+    sync_use_case = SyncCategoriesAndGroupsFromConfigUseCase(
+        repository=category_repository,
+        config_path=CATEGORIES_CONFIG,
+        config_mode=settings.config_sync_mode,
+        default_tz=settings.default_tz,
+        logger=logger,
+    )
+    category_registry = sync_use_case.execute()
+
+    notifier: UserNotifier | None = None
+    bot_sender: TelegramBotSender | None = None
+    instant_delivery: DeliverInstantUseCase | None = None
+    digest_engine: DigestDeliveryEngine | None = None
+    debug_throttle = DebugThrottle()
+
+    if settings.bot_token:
+        bot_sender = TelegramBotSender(settings.bot_token)
+        notifier = UserNotifier(
+            user_repository=user_repository,
+            sender=bot_sender,
+            admin_chat_id=settings.admin_user_id,
+            logger=logger,
+        )
+        instant_delivery = DeliverInstantUseCase(
+            decision_repository=message_repository,
+            notifier=notifier,
+            logger=logger,
+        )
+        digest_engine = DigestDeliveryEngine(
+            repository=delivery_repository,
+            notifier=notifier,
+            tick_seconds=settings.delivery_tick_seconds,
+            logger=logger,
+        )
+        digest_engine.start()
+    else:
+        logger.info("TELEGRAM_BOT_TOKEN not configured; delivery and debug notifications disabled")
+
     store_use_case = StoreMessageAndDecisionUseCase(
         repository=message_repository,
         logger=logger,
     )
-    category_repository = SQLAlchemyCategoryRepository(session_factory=session_factory)
-    sync_use_case = SyncCategoriesAndGroupsFromConfigUseCase(
-        repository=category_repository,
-        config_path=CATEGORIES_CONFIG,
-        logger=logger,
-    )
-    category_registry = sync_use_case.execute()
     cooldown = GeminiCooldownManager(settings.gemini_cooldown_seconds)
-    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    delivery_use_case: DeliverInstantUseCase | None = None
-    bot_sender: TelegramBotSender | None = None
-    if bot_token:
-        user_repository = SQLAlchemyUserRepository(session_factory=session_factory)
-        bot_sender = TelegramBotSender(bot_token)
-        delivery_use_case = DeliverInstantUseCase(
-            user_repository=user_repository,
-            decision_repository=message_repository,
-            sender=bot_sender,
-            logger=logger,
-        )
-    else:
-        logger.info("TELEGRAM_BOT_TOKEN not set; instant delivery disabled")
 
     async def handle_event(event):
         await log_use_case.handle(event)
@@ -203,8 +254,7 @@ async def run_collector(settings: CollectorSettings) -> None:
             return
 
         message_text = getattr(message, "message", "") or ""
-        text_stripped = message_text.strip()
-        if not text_stripped:
+        if not message_text.strip():
             logger.info(
                 "Skipping empty text message chat=%s message_id=%s",
                 chat_id,
@@ -212,8 +262,8 @@ async def run_collector(settings: CollectorSettings) -> None:
             )
             return
 
-        categories = category_registry.get_categories_for_chat(chat_id)
-        if not categories:
+        bindings = category_registry.get_categories_for_chat(chat_id)
+        if not bindings:
             logger.debug("No categories configured for chat %s", chat_id)
             return
 
@@ -225,14 +275,14 @@ async def run_collector(settings: CollectorSettings) -> None:
         )
         await store_use_case.ensure_message(message_record)
 
-        for category in categories:
-            if not category.is_enabled:
+        for binding in bindings:
+            if not binding.is_enabled:
                 continue
-            should_run, reason = should_run_llm(message_text, category.prefilter)
+            should_run, reason = should_run_llm(message_text, binding.prefilter)
             if not should_run:
                 logger.info(
                     "Prefilter skipped category=%s reason=%s",
-                    category.name,
+                    binding.category_name,
                     reason,
                 )
                 continue
@@ -241,46 +291,46 @@ async def run_collector(settings: CollectorSettings) -> None:
                 logger.warning(
                     "Cooldown active (%ss remaining); skipping LLM for category=%s",
                     cooldown.remaining_seconds(),
-                    category.name,
+                    binding.category_name,
                 )
                 continue
 
             try:
                 decision = await filter_use_case.classify(
                     message_text=message_text,
-                    category_name=category.name,
-                    category_prompt=category.prompt,
+                    category_name=binding.category_name,
+                    category_prompt=binding.prompt,
                 )
             except google_exceptions.ResourceExhausted as exc:
                 logger.warning(
                     "Gemini quota exhausted for category=%s: %s",
-                    category.name,
+                    binding.category_name,
                     exc,
                 )
                 cooldown.activate()
                 await store_use_case.record_error(
                     message_record,
-                    category.id,
+                    binding.category_id,
                     "RESOURCE_EXHAUSTED",
                     str(exc),
                 )
                 continue
-            except Exception as exc:  # pragma: no cover - runtime guard
+            except Exception as exc:  # pragma: no cover
                 logger.error(
                     "Gemini classification failed for category=%s: %s",
-                    category.name,
+                    binding.category_name,
                     exc,
                 )
                 await store_use_case.record_error(
                     message_record,
-                    category.id,
+                    binding.category_id,
                     exc.__class__.__name__,
                     str(exc),
                 )
                 continue
 
             decision_record = DecisionRecord(
-                category_id=category.id,
+                category_id=binding.category_id,
                 model=decision.model,
                 prompt_name=decision.prompt_name,
                 prompt_version=decision.prompt_version,
@@ -289,20 +339,50 @@ async def run_collector(settings: CollectorSettings) -> None:
                 reason=decision.reason,
             )
             save_result = await store_use_case.handle(message_record, decision_record)
-            if not save_result:
+            if save_result is None:
                 continue
             _, decision_db_id = save_result
-            if decision_record.passed and delivery_use_case:
-                await delivery_use_case.deliver(
+
+            if (
+                decision_record.passed
+                and binding.delivery_mode == "instant"
+                and binding.is_enabled
+                and instant_delivery
+            ):
+                await instant_delivery.deliver(
                     decision_db_id,
                     decision_record,
-                    category.name,
+                    binding.category_name,
                     message_text,
+                    binding.group_title,
                 )
+
+            if (
+                notifier
+                and binding.debug_enabled
+                and settings.admin_user_id
+            ):
+                allow, warn = debug_throttle.check(binding.category_id)
+                if allow:
+                    snippet = (message_text or "").strip()[:400]
+                    debug_text = (
+                        f"[DEBUG {binding.category_name}] pass={decision_record.passed}"
+                        f" score={decision_record.score:.2f}\n"
+                        f"Reason: {decision_record.reason}\n"
+                        f"Chat: {binding.chat_id}\n"
+                        f"{snippet}"
+                    )
+                    await notifier.notify_admin(debug_text)
+                elif warn:
+                    await notifier.notify_admin(
+                        f"[DEBUG {binding.category_name}] too many events, throttling"
+                    )
 
     try:
         await client.run(settings.source_chat, handle_event)
     finally:
+        if digest_engine is not None:
+            await digest_engine.stop()
         if bot_sender is not None:
             await bot_sender.close()
 

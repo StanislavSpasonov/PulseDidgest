@@ -7,7 +7,16 @@ from typing import Callable, List
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from src.domain.entities import DecisionRecord, MessageRecord, UserRecord
+from src.domain.entities import (
+    CategoryGroupBinding,
+    DigestGroupInfo,
+    PendingDecisionInfo,
+    PrefilterRule,
+    RuntimeCategoryGroup,
+    DecisionRecord,
+    MessageRecord,
+    UserRecord,
+)
 
 from .models import (
     CategoryGroupModel,
@@ -127,19 +136,33 @@ class SQLAlchemyCategoryRepository:
     def __init__(self, session_factory: Callable[[], Session]) -> None:
         self._session_factory = session_factory
 
+    def has_any_categories(self) -> bool:
+        session = self._session_factory()
+        try:
+            return session.query(CategoryModel).first() is not None
+        finally:
+            session.close()
+
     def upsert_category(
-        self, name: str, prompt: str, is_enabled: bool = True
+        self,
+        name: str,
+        prompt: str,
+        debug_enabled: bool,
+        prefilter: PrefilterRule,
     ) -> tuple[str, bool]:
         session = self._session_factory()
         try:
             stmt = select(CategoryModel).where(CategoryModel.name == name)
             category = session.execute(stmt).scalar_one_or_none()
             if category is None:
-                category = CategoryModel(name=name, prompt=prompt, is_enabled=is_enabled)
+                category = CategoryModel(name=name)
                 session.add(category)
-            else:
-                category.prompt = prompt
-                category.is_enabled = is_enabled
+            category.prompt = prompt
+            category.is_enabled = True
+            category.debug_enabled = debug_enabled
+            category.prefilter_min_length = prefilter.min_length
+            category.prefilter_include_any = prefilter.include_any or None
+            category.prefilter_exclude_any = prefilter.exclude_any or None
             session.commit()
             return str(category.id), bool(category.is_enabled)
         except Exception:
@@ -171,33 +194,38 @@ class SQLAlchemyCategoryRepository:
         finally:
             session.close()
 
-    def sync_category_groups(self, category_id: str, group_ids: List[str]) -> None:
+    def sync_category_groups(
+        self, category_id: str, bindings: List[CategoryGroupBinding]
+    ) -> None:
         session = self._session_factory()
         try:
-            stmt = select(CategoryGroupModel.group_id).where(
+            stmt = select(CategoryGroupModel).where(
                 CategoryGroupModel.category_id == uuid.UUID(category_id)
             )
-            existing = {str(row[0]) for row in session.execute(stmt).all()}
-            desired = set(group_ids)
+            existing = {
+                str(row.group_id): row for row in session.execute(stmt).scalars().all()
+            }
+            desired = {binding.group_id for binding in bindings}
 
-            to_add = desired - existing
-            to_remove = existing - desired
+            # Remove old bindings
+            for group_id in set(existing.keys()) - desired:
+                session.delete(existing[group_id])
 
-            for group_id in to_add:
-                session.add(
-                    CategoryGroupModel(
+            # Upsert desired bindings
+            for binding in bindings:
+                group_uuid = uuid.UUID(binding.group_id)
+                link = existing.get(binding.group_id)
+                if link is None:
+                    link = CategoryGroupModel(
                         category_id=uuid.UUID(category_id),
-                        group_id=uuid.UUID(group_id),
+                        group_id=group_uuid,
                     )
-                )
-
-            if to_remove:
-                session.execute(
-                    delete(CategoryGroupModel)
-                    .where(CategoryGroupModel.category_id == uuid.UUID(category_id))
-                    .where(CategoryGroupModel.group_id.in_([uuid.UUID(g) for g in to_remove]))
-                )
-
+                    session.add(link)
+                link.is_enabled = binding.is_enabled
+                link.delivery_mode = binding.delivery_mode
+                link.delivery_interval_minutes = binding.delivery_interval_minutes
+                link.delivery_time_local = binding.delivery_time_local
+                link.delivery_tz = binding.delivery_timezone
             session.commit()
         except Exception:
             session.rollback()
@@ -205,7 +233,150 @@ class SQLAlchemyCategoryRepository:
         finally:
             session.close()
 
+    def load_runtime_registry(self) -> Dict[int, List[RuntimeCategoryGroup]]:
+        session = self._session_factory()
+        try:
+            stmt = (
+                select(CategoryGroupModel, CategoryModel, SourceGroupModel)
+                .join(CategoryModel, CategoryModel.id == CategoryGroupModel.category_id)
+                .join(SourceGroupModel, SourceGroupModel.id == CategoryGroupModel.group_id)
+                .where(CategoryGroupModel.delivery_mode != "instant")
+            )
+            mapping: Dict[int, List[RuntimeCategoryGroup]] = {}
+            for group_link, category, source_group in session.execute(stmt).all():
+                prefilter = PrefilterRule(
+                    min_length=category.prefilter_min_length,
+                    include_any=(category.prefilter_include_any or []),
+                    exclude_any=(category.prefilter_exclude_any or []),
+                )
+                runtime = RuntimeCategoryGroup(
+                    category_id=str(category.id),
+                    category_name=category.name,
+                    prompt=category.prompt,
+                    debug_enabled=bool(category.debug_enabled),
+                    prefilter=prefilter,
+                    group_id=str(group_link.group_id),
+                    chat_id=int(source_group.tg_chat_id),
+                    group_title=source_group.title,
+                    delivery_mode=group_link.delivery_mode,
+                    delivery_interval_minutes=group_link.delivery_interval_minutes,
+                    delivery_time_local=group_link.delivery_time_local,
+                    delivery_timezone=group_link.delivery_tz,
+                    last_sent_at=group_link.last_sent_at,
+                    is_enabled=group_link.is_enabled,
+                )
+                mapping.setdefault(runtime.chat_id, []).append(runtime)
+            return mapping
+        finally:
+            session.close()
 
+
+class SQLAlchemyDeliveryRepository:
+    """Provides data for digest delivery processing."""
+
+    def __init__(self, session_factory: Callable[[], Session]) -> None:
+        self._session_factory = session_factory
+
+    def fetch_digest_groups(self) -> List[DigestGroupInfo]:
+        session = self._session_factory()
+        try:
+            stmt = (
+                select(CategoryGroupModel, CategoryModel, SourceGroupModel)
+                .join(CategoryModel, CategoryModel.id == CategoryGroupModel.category_id)
+                .join(SourceGroupModel, SourceGroupModel.id == CategoryGroupModel.group_id)
+            )
+            groups: List[DigestGroupInfo] = []
+            for group_link, category, source_group in session.execute(stmt).all():
+                groups.append(
+                    DigestGroupInfo(
+                        category_id=str(category.id),
+                        category_name=category.name,
+                        group_id=str(group_link.group_id),
+                        chat_id=int(source_group.tg_chat_id),
+                        group_title=source_group.title,
+                        delivery_mode=group_link.delivery_mode,
+                        delivery_interval_minutes=group_link.delivery_interval_minutes,
+                        delivery_time_local=group_link.delivery_time_local,
+                        delivery_timezone=group_link.delivery_tz,
+                        last_sent_at=group_link.last_sent_at,
+                        is_enabled=group_link.is_enabled,
+                    )
+                )
+            return groups
+        finally:
+            session.close()
+
+    def fetch_pending_decisions(
+        self, category_id: str, chat_id: int, limit: int
+    ) -> List[PendingDecisionInfo]:
+        session = self._session_factory()
+        try:
+            stmt = (
+                select(DecisionModel, MessageModel, CategoryModel)
+                .join(MessageModel, DecisionModel.message_id == MessageModel.id)
+                .join(CategoryModel, DecisionModel.category_id == CategoryModel.id)
+                .where(DecisionModel.category_id == uuid.UUID(category_id))
+                .where(DecisionModel.delivered_at.is_(None))
+                .where(DecisionModel.passed.is_(True))
+                .where(MessageModel.source_chat_id == chat_id)
+                .order_by(DecisionModel.created_at.asc())
+                .limit(limit)
+            )
+            results: List[PendingDecisionInfo] = []
+            for decision, message, category in session.execute(stmt).all():
+                results.append(
+                    PendingDecisionInfo(
+                        decision_id=str(decision.id),
+                        category_id=str(category.id),
+                        category_name=category.name,
+                        message_text=message.text or "",
+                        score=decision.score,
+                        reason=decision.reason,
+                        created_at=decision.created_at,
+                    )
+                )
+            return results
+        finally:
+            session.close()
+
+    def mark_decisions_delivered(self, decision_ids: List[str]) -> None:
+        if not decision_ids:
+            return
+        session = self._session_factory()
+        try:
+            for chunk in [decision_ids[i : i + 50] for i in range(0, len(decision_ids), 50)]:
+                stmt = (
+                    select(DecisionModel)
+                    .where(DecisionModel.id.in_([uuid.UUID(d) for d in chunk]))
+                )
+                for decision in session.execute(stmt).scalars():
+                    decision.delivered_at = func.now()
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def update_last_sent(
+        self, category_id: str, group_id: str, timestamp
+    ) -> None:
+        session = self._session_factory()
+        try:
+            stmt = select(CategoryGroupModel).where(
+                CategoryGroupModel.category_id == uuid.UUID(category_id),
+                CategoryGroupModel.group_id == uuid.UUID(group_id),
+            )
+            link = session.execute(stmt).scalar_one_or_none()
+            if link is None:
+                return
+            link.last_sent_at = timestamp
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 class SQLAlchemyUserRepository:
     """Manages Telegram bot users."""
 

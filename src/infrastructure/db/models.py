@@ -10,11 +10,12 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Integer,
     Text,
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
@@ -56,6 +57,10 @@ class CategoryModel(Base):
     name = Column(Text, nullable=False, unique=True)
     prompt = Column(Text, nullable=False)
     is_enabled = Column(Boolean, nullable=False, server_default="true")
+    debug_enabled = Column(Boolean, nullable=False, server_default="false")
+    prefilter_min_length = Column(Integer, nullable=True)
+    prefilter_include_any = Column(ARRAY(Text), nullable=True)
+    prefilter_exclude_any = Column(ARRAY(Text), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
@@ -95,6 +100,12 @@ class CategoryGroupModel(Base):
         ForeignKey("source_groups.id", ondelete="CASCADE"),
         primary_key=True,
     )
+    is_enabled = Column(Boolean, nullable=False, server_default="true")
+    delivery_mode = Column(Text, nullable=False, server_default="instant")
+    delivery_interval_minutes = Column(Integer, nullable=True)
+    delivery_time_local = Column(Text, nullable=True)
+    delivery_tz = Column(Text, nullable=False, server_default="Europe/Berlin")
+    last_sent_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class LLMErrorModel(Base):

@@ -5,21 +5,11 @@ import asyncio
 import logging
 from typing import Protocol
 
-from src.domain.entities import DecisionRecord, UserRecord
-
-
-class UserRepository(Protocol):
-    def get_active_users(self) -> list[UserRecord]:
-        ...
+from src.domain.entities import DecisionRecord
 
 
 class DecisionDeliveryRepository(Protocol):
     def mark_decision_delivered(self, decision_id: str) -> None:
-        ...
-
-
-class TelegramDeliverySender(Protocol):
-    async def send_message(self, chat_id: int, text: str) -> None:
         ...
 
 
@@ -28,14 +18,12 @@ class DeliverInstantUseCase:
 
     def __init__(
         self,
-        user_repository: UserRepository,
         decision_repository: DecisionDeliveryRepository,
-        sender: TelegramDeliverySender,
+        notifier,
         logger: logging.Logger | None = None,
     ) -> None:
-        self._user_repository = user_repository
         self._decision_repository = decision_repository
-        self._sender = sender
+        self._notifier = notifier
         self._logger = logger or logging.getLogger("collector.delivery")
 
     async def deliver(
@@ -44,37 +32,17 @@ class DeliverInstantUseCase:
         decision: DecisionRecord,
         category_name: str,
         message_text: str,
+        group_title: str | None = None,
     ) -> None:
-        try:
-            users = await asyncio.to_thread(self._user_repository.get_active_users)
-        except Exception as exc:  # pragma: no cover
-            self._logger.error("Failed to load users: %s", exc)
-            return
-
-        if not users:
-            self._logger.info("No active users to deliver decision=%s", decision_id)
-            return
-
-        payload = self._build_message(decision, category_name, message_text)
-        delivered = False
-        for user in users:
-            try:
-                await self._sender.send_message(user.chat_id, payload)
-                delivered = True
-            except Exception as exc:  # pragma: no cover
-                self._logger.warning(
-                    "Failed to deliver to user chat_id=%s: %s",
-                    user.chat_id,
-                    exc,
-                )
+        payload = self._build_message(
+            decision, category_name, message_text, group_title
+        )
+        delivered = await self._notifier.broadcast(payload)
 
         if delivered:
             await asyncio.to_thread(
                 self._decision_repository.mark_decision_delivered,
                 decision_id,
-            )
-            self._logger.info(
-                "Decision=%s delivered to %d user(s)", decision_id, len(users)
             )
         else:
             self._logger.warning(
@@ -82,11 +50,16 @@ class DeliverInstantUseCase:
             )
 
     def _build_message(
-        self, decision: DecisionRecord, category_name: str, message_text: str
+        self,
+        decision: DecisionRecord,
+        category_name: str,
+        message_text: str,
+        group_title: str | None,
     ) -> str:
         status = "✅ PASS" if decision.passed else "❌ FAIL"
+        group_label = f" ({group_title})" if group_title else ""
         return (
-            f"[{category_name}] {status}\n"
+            f"[{category_name}{group_label}] {status}\n"
             f"Score: {decision.score:.2f}\nReason: {decision.reason}\n\n"
             f"{message_text}"
         )

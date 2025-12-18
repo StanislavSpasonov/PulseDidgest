@@ -3,14 +3,21 @@ categories:
     prompt: |
       Act as a Telegram jobs filter for Berlin tech professionals.
       Return JSON {"pass": bool, "score": 0-1, "reason": "short"} telling if the message is a relevant job post.
-    groups:
-      - -1001234567890
+    debug_enabled: false
     prefilter:
       min_length: 30
-      include_any:
-        - job
-        - vacancy
-        - hiring
-      exclude_any:
-        - crypto
-        - giveaway
+      include_any: ["job", "vacancy", "hiring"]
+      exclude_any: ["crypto", "giveaway"]
+    groups:
+      - chat_id: -1001234567890
+        title: Example Jobs
+        delivery:
+          mode: instant
+          is_enabled: true
+      - chat_id: -1009876543210
+        title: Berlin Tech News
+        delivery:
+          mode: interval
+          minutes: 60
+          timezone: Europe/Berlin
+          is_enabled: true

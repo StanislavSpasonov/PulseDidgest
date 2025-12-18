@@ -16,6 +16,7 @@
 - Database layer: persist messages and decisions — PostgreSQL + SQLAlchemy + Alembic
 - Categories & Groups (MVP) — синхронизация категорий/групп, prefilter и логирование llm_errors
 - Telegram Bot + Instant Delivery (MVP) — /start-регистрация и отправка pass=True решений пользователям
+- Delivery Engine (instant + digest) — расписания hourly/interval/daily, cooldown и debug-уведомления
 
 ## Next
-- Digest delivery engine
+- Telegram Bot Admin UI + Reports

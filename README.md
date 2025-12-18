@@ -37,23 +37,43 @@ Collector использует `DATABASE_URL` во время запуска и 
 ## Categories & Groups (MVP)
 
 - Редактируйте `config/categories.yml`, задавая категории, промпты и список Telegram chat_id (BigInt) для каждой категории.
-- Пример записи:
+- Расширенный пример:
 
         categories:
           - name: default_jobs
             prompt: >
               Текст промпта на натуральном языке
-            groups:
-              - -1001234567890
+            debug_enabled: false
             prefilter:
               min_length: 30
               include_any: ["job", "hiring"]
               exclude_any: ["crypto", "giveaway"]
+            groups:
+              - chat_id: -1001234567890
+                title: Berlin Jobs
+                delivery:
+                  mode: instant
+                  is_enabled: true
+              - chat_id: -1009876543210
+                title: Remote Only
+                delivery:
+                  mode: interval
+                  minutes: 60
+                  timezone: Europe/Berlin
+                  is_enabled: true
 
 - Collector синхронизирует таблицы `categories`, `source_groups`, `category_groups` при запуске.
 - Проверить содержимое можно через psql: `docker compose exec postgres psql -U pulsedidgest -d pulsedidgest -c 'SELECT name FROM categories;'` и `... -c 'SELECT category_id, group_id FROM category_groups;'`.
 - Prefilter (min_length/include/exclude) выполняется до LLM; пропущенные сообщения логируются как "Prefilter skipped".
 - При ответе Gemini 429 (`RESOURCE_EXHAUSTED`) создаётся запись в `llm_errors`, включается cooldown и сообщения продолжают сохраняться без LLM-вызовов.
+
+## Delivery Engine (Instant + Digest)
+
+- Instant-доставка работает для привязок с `delivery.mode=instant`: pass=True решения улетают сразу после обработки Gemini.
+- Digest-engine запускается внутри collector (tick задаётся `DELIVERY_TICK_SECONDS`, по умолчанию 60s) и проверяет привязки с режимами `hourly`, `interval <minutes>`, `daily <HH:MM> [TZ]`.
+- Для `interval` требуется `minutes>0`, для `daily` — локальное время `HH:MM` и таймзона (по умолчанию `DEFAULT_TZ`).
+- Digest состоит из заголовка `[category + group]` и списка последних непродоставленных pass-решений (score, reason, урезанный текст). После успешной отправки решения помечаются `delivered_at=NOW()` и `category_groups.last_sent_at` обновляется.
+- Debug режим (`debug_enabled: true`) шлёт админу (см. `TELEGRAM_ADMIN_USER_ID`) подробности по каждому решению, но не больше 20 событий в минуту на категорию.
 
 ## Telegram Bot + Instant Delivery (MVP)
 
@@ -68,7 +88,11 @@ Collector использует `DATABASE_URL` во время запуска и 
 - `TELEGRAM_SOURCE_CHAT` — username или ID источника
 - `TELETHON_SESSION_NAME` — имя файла сессии (опционально, по умолчанию `pulsedidgest`)
 - `TELEGRAM_BOT_TOKEN` — токен бота для /start и instant-доставки
+- `TELEGRAM_ADMIN_USER_ID` — ID администратора (для debug/бот-команд)
 - `GEMINI_API_KEY` — API-ключ Gemini (обязателен для фильтра)
 - `GEMINI_MODEL` — имя модели Gemini (опционально, можно оставить пустым и использовать первую доступную `generateContent`)
 - `GEMINI_COOLDOWN_SECONDS` — пауза после 429 RESOURCE_EXHAUSTED (по умолчанию 60 секунд)
+- `DEFAULT_TZ` — таймзона по умолчанию (используется в delivery/daily)
+- `CONFIG_SYNC_MODE` — `seed_if_empty` (по умолчанию) или `off`
+- `DELIVERY_TICK_SECONDS` — частота проверки digest-расписаний (по умолчанию 60 секунд)
 - `DATABASE_URL` — строка подключения к PostgreSQL (например `postgresql+psycopg://user:password@localhost:5432/pulsedidgest`)
