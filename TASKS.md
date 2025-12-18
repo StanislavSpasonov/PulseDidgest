@@ -12,6 +12,7 @@
 ## Done
 - Project initialization (clean architecture + docs) — структура репо и базовые спецификации
 - Telegram collector: receive messages from one group — Telethon collector выводит новые сообщения в stdout
+- Gemini filter (MVP) — сообщения проходят через Gemini и логируется решение pass/score/reason
 
 ## Next
-- Gemini filter: classify message by category prompt
+- Database layer: persist messages and decisions
