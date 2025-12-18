@@ -1,3 +1,6 @@
 python-dotenv
 telethon
 google-generativeai
+SQLAlchemy>=2.0,<3.0
+psycopg[binary]>=3.1
+alembic>=1.12

@@ -17,6 +17,8 @@ from src.infrastructure.llm_gemini import GeminiFilterClient
 CATEGORY_DESCRIPTION = (
     "Tech and product job opportunities relevant for Berlin-based professionals."
 )
+PROMPT_NAME = "default"
+PROMPT_VERSION = "v1"
 PROMPT_TEMPLATE = """
 You are PulseDidgest's category filter. Assess the Telegram message below for this category:
 "{category}".
@@ -43,6 +45,9 @@ class GeminiFilterDecision:
     passed: bool
     score: float
     reason: str
+    model: str
+    prompt_name: str
+    prompt_version: str
 
 
 class FilterMessageWithGeminiUseCase:
@@ -56,23 +61,23 @@ class FilterMessageWithGeminiUseCase:
         self._gemini_client = gemini_client
         self._logger = logger or logging.getLogger("collector.gemini_use_case")
 
-    async def handle(self, event: NewMessage.Event) -> None:  # type: ignore[name-defined]
+    async def handle(self, event: NewMessage.Event) -> Optional[GeminiFilterDecision]:  # type: ignore[name-defined]
         message = getattr(event, "message", None)
         if message is None:
             self._logger.warning("Gemini filter received empty event: %s", event)
-            return
+            return None
 
         text = getattr(message, "message", "") or ""
         text = text.strip()
         if not text:
             self._logger.info("Gemini filter skipped message without text: id=%s", getattr(message, "id", None))
-            return
+            return None
 
         try:
             decision = await self._classify_text(text)
         except Exception as exc:  # pragma: no cover - runtime guard
             self._logger.error("Gemini classification failed: %s", exc)
-            return
+            return None
 
         self._logger.info(
             '[LLM] pass=%s score=%.2f reason="%s"',
@@ -80,6 +85,7 @@ class FilterMessageWithGeminiUseCase:
             decision.score,
             decision.reason,
         )
+        return decision
 
     async def _classify_text(self, message_text: str) -> GeminiFilterDecision:
         prompt = PROMPT_TEMPLATE.format(
@@ -97,7 +103,14 @@ class FilterMessageWithGeminiUseCase:
         passed = bool(payload.get("pass", False))
         score = self._sanitize_score(payload.get("score"))
         reason = str(payload.get("reason") or "No reason provided").strip()
-        return GeminiFilterDecision(passed=passed, score=score, reason=reason[:200])
+        return GeminiFilterDecision(
+            passed=passed,
+            score=score,
+            reason=reason[:200],
+            model=self._gemini_client.model_name,
+            prompt_name=PROMPT_NAME,
+            prompt_version=PROMPT_VERSION,
+        )
 
     @staticmethod
     def _sanitize_score(value) -> float:

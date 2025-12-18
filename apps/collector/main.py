@@ -6,6 +6,7 @@ import logging
 import os
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -18,6 +19,12 @@ from src.application.use_cases.filter_message_with_gemini import (
     FilterMessageWithGeminiUseCase,
 )
 from src.application.use_cases.log_telegram_message import LogTelegramMessageUseCase
+from src.application.use_cases.store_message_and_decision import (
+    StoreMessageAndDecisionUseCase,
+)
+from src.domain.entities import DecisionRecord, MessageRecord
+from src.infrastructure.db.engine import get_session_factory
+from src.infrastructure.db.repositories import SQLAlchemyMessageDecisionRepository
 from src.infrastructure.llm_gemini import GeminiFilterClient
 from src.infrastructure.telegram_client.collector_client import TelegramCollectorClient
 
@@ -42,6 +49,7 @@ def load_settings() -> CollectorSettings:
     session_name = os.getenv("TELETHON_SESSION_NAME", DEFAULT_SESSION_NAME)
     gemini_api_key = _require_env("GEMINI_API_KEY")
     gemini_model = os.getenv("GEMINI_MODEL") or None
+    _require_env("DATABASE_URL")
 
     try:
         api_id_int = int(api_id)
@@ -87,10 +95,52 @@ async def run_collector(settings: CollectorSettings) -> None:
         gemini_client=gemini_client,
         logger=logger,
     )
+    session_factory = get_session_factory()
+    repository = SQLAlchemyMessageDecisionRepository(session_factory=session_factory)
+    store_use_case = StoreMessageAndDecisionUseCase(
+        repository=repository,
+        logger=logger,
+    )
 
     async def handle_event(event):
         await log_use_case.handle(event)
-        await filter_use_case.handle(event)
+        decision = await filter_use_case.handle(event)
+        if decision is None:
+            return
+        await persist_decision(event, decision)
+
+    async def persist_decision(event, decision):
+        message = getattr(event, "message", None)
+        if message is None:
+            logger.warning("Persistence skipped: event without message %s", event)
+            return
+
+        chat_id = getattr(event, "chat_id", None)
+        message_id = getattr(message, "id", None)
+        message_date = getattr(message, "date", None) or datetime.utcnow()
+        if chat_id is None or message_id is None:
+            logger.warning(
+                "Persistence skipped: missing chat_id/message_id (chat=%s, message=%s)",
+                chat_id,
+                message_id,
+            )
+            return
+
+        message_record = MessageRecord(
+            source_chat_id=int(chat_id),
+            source_message_id=int(message_id),
+            date=message_date,
+            text=getattr(message, "message", None),
+        )
+        decision_record = DecisionRecord(
+            model=decision.model,
+            prompt_name=decision.prompt_name,
+            prompt_version=decision.prompt_version,
+            passed=decision.passed,
+            score=decision.score,
+            reason=decision.reason,
+        )
+        await store_use_case.handle(message_record, decision_record)
 
     await client.run(settings.source_chat, handle_event)
 

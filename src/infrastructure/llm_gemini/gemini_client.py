@@ -76,3 +76,7 @@ class GeminiFilterClient:
             if "generateContent" in methods:
                 return getattr(model, "name", None)
         return None
+
+    @property
+    def model_name(self) -> str:
+        return self._model_name
