@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import uuid
-from typing import Callable, List
+from datetime import datetime, timedelta
+from typing import Callable, List, Optional, Tuple
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
@@ -407,6 +408,351 @@ class SQLAlchemyUserRepository:
             raise
         finally:
             session.close()
+
+
+class SQLAlchemyAdminRepository:
+    """Administrative helpers for the Telegram bot."""
+
+    def __init__(self, session_factory: Callable[[], Session]) -> None:
+        self._session_factory = session_factory
+
+    # Category operations
+    def list_categories(self) -> List[CategoryModel]:
+        session = self._session_factory()
+        try:
+            stmt = select(CategoryModel).order_by(CategoryModel.name.asc())
+            return session.execute(stmt).scalars().all()
+        finally:
+            session.close()
+
+    def create_category(self, name: str) -> None:
+        session = self._session_factory()
+        try:
+            existing = session.execute(
+                select(CategoryModel).where(CategoryModel.name == name)
+            ).scalar_one_or_none()
+            if existing:
+                raise ValueError("Category already exists")
+            session.add(CategoryModel(name=name, prompt=""))
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def set_category_prompt(self, name: str, prompt: str) -> None:
+        session = self._session_factory()
+        try:
+            category = self._get_category(session, name)
+            category.prompt = prompt
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def set_category_debug(self, name: str, enabled: bool) -> None:
+        session = self._session_factory()
+        try:
+            category = self._get_category(session, name)
+            category.debug_enabled = enabled
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def get_category_details(self, name: str):
+        session = self._session_factory()
+        try:
+            category = self._get_category(session, name)
+            stmt = (
+                select(CategoryGroupModel, SourceGroupModel)
+                .join(SourceGroupModel, SourceGroupModel.id == CategoryGroupModel.group_id)
+                .where(CategoryGroupModel.category_id == category.id)
+            )
+            return category, session.execute(stmt).all()
+        finally:
+            session.close()
+
+    # Group operations
+    def list_groups(self) -> List[SourceGroupModel]:
+        session = self._session_factory()
+        try:
+            stmt = select(SourceGroupModel).order_by(SourceGroupModel.created_at.desc())
+            return session.execute(stmt).scalars().all()
+        finally:
+            session.close()
+
+    def register_group(self, chat_id: int, title: Optional[str]) -> None:
+        session = self._session_factory()
+        try:
+            group = session.execute(
+                select(SourceGroupModel).where(SourceGroupModel.tg_chat_id == chat_id)
+            ).scalar_one_or_none()
+            if group is None:
+                group = SourceGroupModel(tg_chat_id=chat_id, title=title)
+                session.add(group)
+            else:
+                if title:
+                    group.title = title
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def bind_category(self, category_name: str, chat_id: int) -> None:
+        session = self._session_factory()
+        try:
+            category = self._get_category(session, category_name)
+            group = self._get_or_create_group(session, chat_id)
+            link = self._get_or_create_link(session, category.id, group.id)
+            link.is_enabled = True
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def unbind_category(self, category_name: str, chat_id: int) -> None:
+        session = self._session_factory()
+        try:
+            category = self._get_category(session, category_name)
+            group = self._get_group(session, chat_id)
+            link = self._get_link(session, category.id, group.id)
+            session.delete(link)
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    # Delivery settings
+    def get_delivery_info(self, name: str):
+        session = self._session_factory()
+        try:
+            category = self._get_category(session, name)
+            stmt = (
+                select(CategoryGroupModel, SourceGroupModel)
+                .join(SourceGroupModel, SourceGroupModel.id == CategoryGroupModel.group_id)
+                .where(CategoryGroupModel.category_id == category.id)
+            )
+            return session.execute(stmt).all()
+        finally:
+            session.close()
+
+    def set_delivery(
+        self,
+        category_name: str,
+        chat_id: int,
+        mode: str,
+        interval_minutes: Optional[int],
+        time_local: Optional[str],
+        timezone: str,
+    ) -> None:
+        session = self._session_factory()
+        try:
+            category = self._get_category(session, category_name)
+            group = self._get_group(session, chat_id)
+            link = self._get_link(session, category.id, group.id)
+            link.delivery_mode = mode
+            link.delivery_interval_minutes = interval_minutes
+            link.delivery_time_local = time_local
+            link.delivery_tz = timezone
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def set_delivery_enabled(
+        self, category_name: str, chat_id: int, enabled: bool
+    ) -> None:
+        session = self._session_factory()
+        try:
+            category = self._get_category(session, category_name)
+            group = self._get_group(session, chat_id)
+            link = self._get_link(session, category.id, group.id)
+            link.is_enabled = enabled
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    # Reports
+    def report_category(
+        self, name: str, hours: int, limit: int
+    ) -> Tuple[int, int, List[Tuple[DecisionModel, MessageModel]]]:
+        session = self._session_factory()
+        try:
+            category = self._get_category(session, name)
+            since = datetime.utcnow() - timedelta(hours=hours)
+            pass_count = session.execute(
+                select(func.count())
+                .select_from(DecisionModel)
+                .where(DecisionModel.category_id == category.id)
+                .where(DecisionModel.created_at >= since)
+                .where(DecisionModel.passed.is_(True))
+            ).scalar_one()
+            fail_count = session.execute(
+                select(func.count())
+                .select_from(DecisionModel)
+                .where(DecisionModel.category_id == category.id)
+                .where(DecisionModel.created_at >= since)
+                .where(DecisionModel.passed.is_(False))
+            ).scalar_one()
+            recent = (
+                select(DecisionModel, MessageModel)
+                .join(MessageModel, DecisionModel.message_id == MessageModel.id)
+                .where(DecisionModel.category_id == category.id)
+                .order_by(DecisionModel.created_at.desc())
+                .limit(limit)
+            )
+            rows = session.execute(recent).all()
+            return pass_count, fail_count, rows
+        finally:
+            session.close()
+
+    def report_group(
+        self, name: str, chat_id: int, hours: int, limit: int
+    ) -> Tuple[int, int, List[Tuple[DecisionModel, MessageModel]]]:
+        session = self._session_factory()
+        try:
+            category = self._get_category(session, name)
+            since = datetime.utcnow() - timedelta(hours=hours)
+            pass_count = session.execute(
+                select(func.count())
+                .select_from(DecisionModel)
+                .join(MessageModel, DecisionModel.message_id == MessageModel.id)
+                .where(DecisionModel.category_id == category.id)
+                .where(MessageModel.source_chat_id == chat_id)
+                .where(DecisionModel.created_at >= since)
+                .where(DecisionModel.passed.is_(True))
+            ).scalar_one()
+            fail_count = session.execute(
+                select(func.count())
+                .select_from(DecisionModel)
+                .join(MessageModel, DecisionModel.message_id == MessageModel.id)
+                .where(DecisionModel.category_id == category.id)
+                .where(MessageModel.source_chat_id == chat_id)
+                .where(DecisionModel.created_at >= since)
+                .where(DecisionModel.passed.is_(False))
+            ).scalar_one()
+            recent = (
+                select(DecisionModel, MessageModel)
+                .join(MessageModel, DecisionModel.message_id == MessageModel.id)
+                .where(DecisionModel.category_id == category.id)
+                .where(MessageModel.source_chat_id == chat_id)
+                .order_by(DecisionModel.created_at.desc())
+                .limit(limit)
+            )
+            rows = session.execute(recent).all()
+            return pass_count, fail_count, rows
+        finally:
+            session.close()
+
+    def last_decisions(
+        self, name: str, passed: Optional[bool], limit: int
+    ) -> List[Tuple[DecisionModel, MessageModel]]:
+        session = self._session_factory()
+        try:
+            category = self._get_category(session, name)
+            stmt = (
+                select(DecisionModel, MessageModel)
+                .join(MessageModel, DecisionModel.message_id == MessageModel.id)
+                .where(DecisionModel.category_id == category.id)
+                .order_by(DecisionModel.created_at.desc())
+                .limit(limit)
+            )
+            if passed is True:
+                stmt = stmt.where(DecisionModel.passed.is_(True))
+            elif passed is False:
+                stmt = stmt.where(DecisionModel.passed.is_(False))
+            return session.execute(stmt).all()
+        finally:
+            session.close()
+
+    def list_llm_errors(self, hours: int, limit: int):
+        session = self._session_factory()
+        try:
+            since = datetime.utcnow() - timedelta(hours=hours)
+            stmt = (
+                select(LLMErrorModel, CategoryModel)
+                .join(CategoryModel, CategoryModel.id == LLMErrorModel.category_id)
+                .where(LLMErrorModel.created_at >= since)
+                .order_by(LLMErrorModel.created_at.desc())
+                .limit(limit)
+            )
+            return session.execute(stmt).all()
+        finally:
+            session.close()
+
+    # Helper methods
+    def _get_category(self, session: Session, name: str) -> CategoryModel:
+        category = session.execute(
+            select(CategoryModel).where(CategoryModel.name == name)
+        ).scalar_one_or_none()
+        if category is None:
+            raise ValueError("Category not found")
+        return category
+
+    def _get_group(self, session: Session, chat_id: int) -> SourceGroupModel:
+        group = session.execute(
+            select(SourceGroupModel).where(SourceGroupModel.tg_chat_id == chat_id)
+        ).scalar_one_or_none()
+        if group is None:
+            raise ValueError("Group not found")
+        return group
+
+    def _get_or_create_group(
+        self, session: Session, chat_id: int
+    ) -> SourceGroupModel:
+        group = session.execute(
+            select(SourceGroupModel).where(SourceGroupModel.tg_chat_id == chat_id)
+        ).scalar_one_or_none()
+        if group is None:
+            group = SourceGroupModel(tg_chat_id=chat_id)
+            session.add(group)
+            session.flush()
+        return group
+
+    def _get_link(
+        self, session: Session, category_id: uuid.UUID, group_id: uuid.UUID
+    ) -> CategoryGroupModel:
+        link = session.execute(
+            select(CategoryGroupModel).where(
+                CategoryGroupModel.category_id == category_id,
+                CategoryGroupModel.group_id == group_id,
+            )
+        ).scalar_one_or_none()
+        if link is None:
+            raise ValueError("Binding not found")
+        return link
+
+    def _get_or_create_link(
+        self, session: Session, category_id: uuid.UUID, group_id: uuid.UUID
+    ) -> CategoryGroupModel:
+        link = session.execute(
+            select(CategoryGroupModel).where(
+                CategoryGroupModel.category_id == category_id,
+                CategoryGroupModel.group_id == group_id,
+            )
+        ).scalar_one_or_none()
+        if link is None:
+            link = CategoryGroupModel(category_id=category_id, group_id=group_id)
+            session.add(link)
+            session.flush()
+        return link
 
     def get_active_users(self) -> List[UserRecord]:
         session = self._session_factory()
