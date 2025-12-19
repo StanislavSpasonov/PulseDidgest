@@ -154,6 +154,44 @@ async def main() -> None:
         except Exception as exc:
             await message.answer(f"Failed to create category: {exc}")
 
+    @dp.message(Command("category_show"))
+    async def handle_category_show(message: types.Message) -> None:
+        if not ensure_admin(message, admin_user_id):
+            await message.answer("Admin only")
+            return
+        parts = message.text.split(maxsplit=1)
+        if len(parts) < 2:
+            await message.answer("Usage: /category_show <name>")
+            return
+        name = parts[1].strip()
+        try:
+            category, links = await asyncio.to_thread(
+                admin_repo.get_category_details, name
+            )
+        except Exception as exc:
+            await message.answer(f"Error: {exc}")
+            return
+
+        prompt_preview = (category.prompt or "").strip()
+        if len(prompt_preview) > 200:
+            prompt_preview = prompt_preview[:200] + "…"
+
+        lines = [
+            f"Category: {category.name}",
+            f"Debug: {'on' if category.debug_enabled else 'off'}",
+            f"Prompt: {prompt_preview or '<empty>'}",
+            "Bindings:",
+        ]
+        if not links:
+            lines.append("  (none)")
+        else:
+            for link, group in links:
+                lines.append(
+                    f"- chat {group.tg_chat_id} ({group.title or 'no title'}), "
+                    f"mode={link.delivery_mode} enabled={link.is_enabled}"
+                )
+        await message.answer("\n".join(lines))
+
     class PromptContext(StatesGroup):
         waiting = State()
 
