@@ -82,6 +82,8 @@ Collector использует `DATABASE_URL` во время запуска и 
 3. Запустите collector (`python apps/collector/main.py`). Когда Gemini вернёт `pass=true`, решение будет немедленно отправлено всем активным пользователям. В сообщении отображается категория, score и исходный текст.
 4. Проверить доставку можно в БД: `docker compose exec postgres psql -U pulsedidgest -d pulsedidgest -c 'SELECT delivered_at FROM decisions ORDER BY created_at DESC LIMIT 5;'`.
 
+Если forward-сообщение не содержит источника (из-за content protection), включите `BOT_DEBUG_FORWARD=1`: бот выведет все forward-поля в лог (stdout) и можно использовать `/group_add_id <chat_id> [title]`.
+
 ### Переменные окружения
 - `TELEGRAM_API_ID` — API ID Telegram (integer)
 - `TELEGRAM_API_HASH` — соответствующий API hash
@@ -95,4 +97,5 @@ Collector использует `DATABASE_URL` во время запуска и 
 - `DEFAULT_TZ` — таймзона по умолчанию (используется в delivery/daily)
 - `CONFIG_SYNC_MODE` — `seed_if_empty` (по умолчанию) или `off`
 - `DELIVERY_TICK_SECONDS` — частота проверки digest-расписаний (по умолчанию 60 секунд)
+- `BOT_DEBUG_FORWARD` — режим отладки `/group_add` (0/1)
 - `DATABASE_URL` — строка подключения к PostgreSQL (например `postgresql+psycopg://user:password@localhost:5432/pulsedidgest`)
