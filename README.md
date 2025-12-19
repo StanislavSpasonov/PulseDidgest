@@ -86,7 +86,8 @@ Collector использует `DATABASE_URL` во время запуска и 
 
 Используйте Telethon user session:
 - `/groups_my` — показать все группы/каналы текущего пользователя.
-- `/group_add_name <имя или username>` — найти чат по названию/username и добавить его в систему (без forward).
+- `/group_add_name <имя или username>` — найти чат по названию/username и добавить его в систему без forward.
+- `/group_add_chat <chat_id> [title]` — ручное добавление, если известен chat_id.
 
 Если бот не находит чат, сначала вызовите `/groups_my` и скопируйте нужное название/username.
 

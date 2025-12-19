@@ -110,7 +110,7 @@ async def main() -> None:
                 "\nAdmin commands:\n"
                 "/categories, /category_show <name>, /category_create <name>\n"
                 "/category_prompt <name>, /category_debug_on|off <name>\n"
-                "/groups, /groups_my, /group_add_name <query>\n"
+                "/groups, /groups_my, /group_add_name <query>, /group_add_chat <chat_id> [title]\n"
                 "/bind <category> <chat_id>, /unbind <category> <chat_id>\n"
                 "/delivery_show <category>, /delivery_set <category> <chat_id> <mode> [args]\n"
                 "/delivery_enable|disable <category> <chat_id>\n"
@@ -252,6 +252,24 @@ async def main() -> None:
                 chunk = []
         if chunk:
             await message.answer("\n".join(chunk))
+
+    @dp.message(Command("group_add_chat"))
+    async def handle_group_add_chat(message: types.Message) -> None:
+        if not ensure_admin(message, admin_user_id):
+            await message.answer("Admin only")
+            return
+        parts = message.text.split(maxsplit=2)
+        if len(parts) < 2:
+            await message.answer("Usage: /group_add_chat <chat_id> [title]")
+            return
+        try:
+            chat_id = int(parts[1])
+        except ValueError:
+            await message.answer("chat_id must be integer")
+            return
+        title = parts[2].strip() if len(parts) > 2 else None
+        await asyncio.to_thread(admin_repo.register_group, chat_id, title)
+        await message.answer(f"Group registered manually: {chat_id}")
 
     @dp.message(Command("group_add_name"))
     async def handle_group_add_name(message: types.Message) -> None:
