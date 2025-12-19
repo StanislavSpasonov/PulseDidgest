@@ -13,6 +13,7 @@ from .category_config import (
 )
 from .user import UserRecord
 from .delivery import DigestGroupInfo, PendingDecisionInfo
+from .telegram_chat import TelegramChatInfo
 
 __all__ = [
     "MessageRecord",
@@ -27,4 +28,5 @@ __all__ = [
     "UserRecord",
     "DigestGroupInfo",
     "PendingDecisionInfo",
+    "TelegramChatInfo",
 ]

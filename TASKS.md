@@ -17,6 +17,7 @@
 - Categories & Groups (MVP) — синхронизация категорий/групп, prefilter и логирование llm_errors
 - Telegram Bot + Instant Delivery (MVP) — /start-регистрация и отправка pass=True решений пользователям
 - Delivery Engine (instant + digest) — расписания hourly/interval/daily, cooldown и debug-уведомления
+- Group management via Telethon — админ-бот управляет группами без forward
 
 ## Next
-- Telegram Bot Admin UI + Reports
+- Telegram Bot UX polish + per-user delivery settings

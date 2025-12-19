@@ -2,12 +2,11 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command, CommandStart
@@ -20,11 +19,18 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.application.use_cases.manage_groups_telethon import (
+    AddGroupByNameUseCase,
+    GroupNotFoundError,
+    ListUserChatsUseCase,
+    MultipleGroupsFoundError,
+)
 from src.infrastructure.db.engine import get_session_factory
 from src.infrastructure.db.repositories import (
     SQLAlchemyAdminRepository,
     SQLAlchemyUserRepository,
 )
+from src.infrastructure.telegram_client.dialog_service import TelethonDialogService
 
 DOTENV_PATH = PROJECT_ROOT / ".env"
 
@@ -32,100 +38,11 @@ DOTENV_PATH = PROJECT_ROOT / ".env"
 class PromptStates(StatesGroup):
     waiting_for_prompt = State()
 
-
-class GroupAddStates(StatesGroup):
-    waiting_for_forward = State()
-
-
 def ensure_admin(message: types.Message, admin_id: int) -> bool:
     return bool(message.from_user and admin_id and message.from_user.id == admin_id)
 
 
-def extract_forward_chat(message: types.Message) -> Optional[types.Chat]:
-    forward_chat = getattr(message, "forward_from_chat", None)
-    if forward_chat:
-        return forward_chat
-    origin = getattr(message, "forward_origin", None)
-    if origin:
-        chat = getattr(origin, "chat", None) or getattr(origin, "sender_chat", None)
-        if chat:
-            return chat
-    forward_sender_chat = getattr(message, "forward_sender_chat", None)
-    if forward_sender_chat:
-        return forward_sender_chat
-    return None
 
-
-def serialize_chat(chat: Optional[types.Chat]) -> Optional[dict]:
-    if not chat:
-        return None
-    return {
-        "id": getattr(chat, "id", None),
-        "type": getattr(chat, "type", None),
-        "title": getattr(chat, "title", None),
-        "username": getattr(chat, "username", None),
-    }
-
-
-def serialize_user(user: Optional[types.User]) -> Optional[dict]:
-    if not user:
-        return None
-    return {
-        "id": getattr(user, "id", None),
-        "username": getattr(user, "username", None),
-    }
-
-
-def serialize_forward_origin(origin) -> Optional[dict]:
-    if not origin:
-        return None
-    return {
-        "type": getattr(origin, "type", None),
-        "chat": serialize_chat(getattr(origin, "chat", None)),
-        "sender_chat": serialize_chat(getattr(origin, "sender_chat", None)),
-        "sender_user": serialize_user(getattr(origin, "sender_user", None)),
-    }
-
-
-def log_forward_details(message: types.Message, debug_forward: bool) -> None:
-    logger = logging.getLogger("bot.forward")
-    if not debug_forward:
-        origin = extract_forward_chat(message)
-        logger.info(
-            "group_add forward summary chat=%s forward_chat_id=%s",
-            getattr(message.chat, "id", None),
-            getattr(origin, "id", None) if origin else None,
-        )
-        return
-
-    payload = {
-        "message_chat": serialize_chat(message.chat),
-        "from_user": serialize_user(message.from_user),
-        "forward_from_chat": serialize_chat(getattr(message, "forward_from_chat", None)),
-        "forward_origin": serialize_forward_origin(getattr(message, "forward_origin", None)),
-        "forward_sender_chat": serialize_chat(
-            getattr(message, "forward_sender_chat", None)
-        ),
-        "forward_sender_name": getattr(message, "forward_sender_name", None),
-        "forward_from_user": serialize_user(getattr(message, "forward_from", None)),
-        "forward_date": str(getattr(message, "forward_date", None)),
-        "is_automatic_forward": getattr(message, "is_automatic_forward", None),
-        "has_protected_content": getattr(message, "has_protected_content", None),
-        "text": (message.text or message.caption or "")[:200],
-    }
-    logger.info("group_add forward payload: %s", json.dumps(payload, ensure_ascii=False))
-
-
-def build_missing_fields_summary(message: types.Message) -> str:
-    fields = {
-        "forward_from_chat": bool(getattr(message, "forward_from_chat", None)),
-        "forward_origin": bool(getattr(message, "forward_origin", None)),
-        "forward_sender_chat": bool(getattr(message, "forward_sender_chat", None)),
-        "forward_from": bool(getattr(message, "forward_from", None)),
-        "forward_sender_name": bool(getattr(message, "forward_sender_name", None)),
-    }
-    missing = [name for name, present in fields.items() if not present]
-    return ", ".join(missing) if missing else "(none)"
 
 
 async def main() -> None:
@@ -140,13 +57,27 @@ async def main() -> None:
         raise RuntimeError("TELEGRAM_BOT_TOKEN is required for the bot")
     admin_user_id = int(os.getenv("TELEGRAM_ADMIN_USER_ID", "0"))
     default_tz = os.getenv("DEFAULT_TZ", "Europe/Berlin")
-    debug_forward = os.getenv("BOT_DEBUG_FORWARD", "0") == "1"
+    telethon_api_id = int(os.getenv("TELEGRAM_API_ID", "0"))
+    telethon_api_hash = os.getenv("TELEGRAM_API_HASH")
+    session_name = os.getenv("TELETHON_SESSION_NAME", "pulsedidgest")
+    if not telethon_api_id or not telethon_api_hash:
+        raise RuntimeError(
+            "TELEGRAM_API_ID and TELEGRAM_API_HASH are required for Telethon-based group management"
+        )
 
     bot = Bot(token=token)
     dp = Dispatcher(storage=MemoryStorage())
     session_factory = get_session_factory()
     user_repo = SQLAlchemyUserRepository(session_factory=session_factory)
     admin_repo = SQLAlchemyAdminRepository(session_factory=session_factory)
+    dialog_service = TelethonDialogService(
+        api_id=telethon_api_id,
+        api_hash=telethon_api_hash,
+        session_name=session_name,
+        logger=logging.getLogger("bot.telethon"),
+    )
+    list_chats_use_case = ListUserChatsUseCase(dialog_service)
+    add_group_use_case = AddGroupByNameUseCase(dialog_service, admin_repo)
 
     # --------- Basic commands ---------
     @dp.message(CommandStart())
@@ -173,7 +104,7 @@ async def main() -> None:
                 "\nAdmin commands:\n"
                 "/categories, /category_show <name>, /category_create <name>\n"
                 "/category_prompt <name>, /category_debug_on|off <name>\n"
-                "/groups, /group_add, /group_add_id <chat_id> [title]\n"
+                "/groups, /groups_my, /group_add_name <query>\n"
                 "/bind <category> <chat_id>, /unbind <category> <chat_id>\n"
                 "/delivery_show <category>, /delivery_set <category> <chat_id> <mode> [args]\n"
                 "/delivery_enable|disable <category> <chat_id>\n"
@@ -279,7 +210,7 @@ async def main() -> None:
     async def handle_debug_off(message: types.Message) -> None:
         await _toggle_debug(message, False)
 
-    # --------- Groups / Forward debug ---------
+    # --------- Groups (Telethon) ---------
     @dp.message(Command("groups"))
     async def handle_groups(message: types.Message) -> None:
         if not ensure_admin(message, admin_user_id):
@@ -287,69 +218,62 @@ async def main() -> None:
             return
         groups = await asyncio.to_thread(admin_repo.list_groups)
         if not groups:
-            await message.answer("No groups registered")
+            await message.answer("No groups registered in DB")
             return
-        lines = ["Groups:"]
+        lines = ["Stored groups:"]
         for group in groups[:40]:
-            lines.append(
-                f"- chat_id={group.tg_chat_id} title={group.title or '<none>'}"
-            )
+            lines.append(f"- chat_id={group.tg_chat_id} title={group.title or '<none>'}")
         await message.answer("\n".join(lines))
 
-    @dp.message(Command("group_add"))
-    async def handle_group_add(message: types.Message, state: FSMContext) -> None:
+    @dp.message(Command("groups_my"))
+    async def handle_groups_my(message: types.Message) -> None:
         if not ensure_admin(message, admin_user_id):
             await message.answer("Admin only")
-            return
-        await state.set_state(GroupAddStates.waiting_for_forward)
-        await message.answer(
-            "Forward a message from the target chat/channel to register it."
-            " If the source is hidden (content protection), enable BOT_DEBUG_FORWARD=1"
-            " and use /group_add_id <chat_id> [title]."
-        )
-
-    @dp.message(GroupAddStates.waiting_for_forward)
-    async def handle_forwarded_group(message: types.Message, state: FSMContext) -> None:
-        log_forward_details(message, debug_forward)
-        forward_chat = extract_forward_chat(message)
-        if not forward_chat:
-            missing = build_missing_fields_summary(message)
-            await message.answer(
-                "No forward source detected. Missing fields: {}. Try disabling "
-                "Content Protection or use /group_add_id.".format(missing)
-            )
-            await state.clear()
-            return
-        await asyncio.to_thread(
-            admin_repo.register_group,
-            forward_chat.id,
-            forward_chat.title or forward_chat.full_name,
-        )
-        await message.answer(
-            f"Detected forward source: {forward_chat.title or forward_chat.full_name} "
-            f"chat_id={forward_chat.id}"
-        )
-        await state.clear()
-
-    @dp.message(Command("group_add_id"))
-    async def handle_group_add_id(message: types.Message) -> None:
-        if not ensure_admin(message, admin_user_id):
-            await message.answer("Admin only")
-            return
-        parts = message.text.split(maxsplit=2)
-        if len(parts) < 2:
-            await message.answer("Usage: /group_add_id <chat_id> [title]")
             return
         try:
-            chat_id = int(parts[1])
-        except ValueError:
-            await message.answer("chat_id must be integer")
+            chats = await list_chats_use_case.execute()
+        except Exception as exc:
+            await message.answer(f"Failed to fetch chats: {exc}")
             return
-        title = parts[2].strip() if len(parts) > 2 else None
-        await asyncio.to_thread(admin_repo.register_group, chat_id, title)
-        await message.answer(f"Group registered manually: {chat_id}")
+        if not chats:
+            await message.answer("No chats found via Telethon session")
+            return
+        chunk = []
+        for chat in chats:
+            chunk.append(format_chat_line(chat))
+            if len(chunk) == 20:
+                await message.answer("\n".join(chunk))
+                chunk = []
+        if chunk:
+            await message.answer("\n".join(chunk))
 
-    # --------- Binding operations ---------
+    @dp.message(Command("group_add_name"))
+    async def handle_group_add_name(message: types.Message) -> None:
+        if not ensure_admin(message, admin_user_id):
+            await message.answer("Admin only")
+            return
+        parts = message.text.split(maxsplit=1)
+        if len(parts) < 2:
+            await message.answer("Usage: /group_add_name <name_or_username>")
+            return
+        query = parts[1].strip()
+        try:
+            chat = await add_group_use_case.execute(query)
+        except GroupNotFoundError:
+            await message.answer("Group not found. Run /groups_my for a list of available chats.")
+        except MultipleGroupsFoundError as exc:
+            lines = ["Multiple groups found:"]
+            for match in exc.matches[:10]:
+                lines.append(f"- {format_chat_line(match)}")
+            lines.append("Please specify exact username/title.")
+            await message.answer("\n".join(lines))
+        except Exception as exc:
+            await message.answer(f"Failed to add group: {exc}")
+        else:
+            await message.answer("Saved group: {} chat_id={}".format(
+                chat.title or chat.username or chat.chat_id, chat.chat_id
+            ))
+# --------- Binding operations ---------
     async def _bind_unbind(message: types.Message, bind: bool) -> None:
         if not ensure_admin(message, admin_user_id):
             await message.answer("Admin only")
