@@ -45,6 +45,12 @@ def ensure_admin(message: types.Message, admin_id: int) -> bool:
 
 
 
+def format_chat_line(chat) -> str:
+    username = f" (@{chat.username})" if chat.username else ""
+    label = chat.title or (f"@{chat.username}" if chat.username else str(chat.chat_id))
+    return f"{label}{username} — {chat.chat_id} [{chat.chat_type}]"
+
+
 async def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
