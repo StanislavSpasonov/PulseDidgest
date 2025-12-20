@@ -115,4 +115,5 @@ Collector использует `DATABASE_URL` во время запуска и 
 5. Запуск:
    - collector: `python apps/collector/main.py`
    - bot: `python apps/bot/main.py`
+   - вместе: `python -m apps.main`
 6. Тесты: `python -m pytest -q`

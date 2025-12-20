@@ -29,6 +29,7 @@
 - Fix: link selection callbacks shortened + navigation state cleared
 - Tests: navigation layout (list keyboard back/home ordering)
 - Logging: collector pipeline diagnostics (bindings/persist/decisions)
+- Launcher: single entrypoint runs bot + collector
 
 ## Next
-- QA: проверить Bot UI v1 по acceptance criteria и собрать баги/фиксы
+- QA: проверить unified launcher + Bot UI по acceptance criteria
