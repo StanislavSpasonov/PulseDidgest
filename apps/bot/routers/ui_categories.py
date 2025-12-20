@@ -230,11 +230,11 @@ def _build_digest_presets_kb() -> types.InlineKeyboardMarkup:
     )
     builder.button(
         text="ежедневно 08:00",
-        callback_data=CategoryDeliveryCb(action="preset", mode="daily", value="08:00").pack(),
+        callback_data=CategoryDeliveryCb(action="preset", mode="daily", value="08-00").pack(),
     )
     builder.button(
         text="ежедневно 18:00",
-        callback_data=CategoryDeliveryCb(action="preset", mode="daily", value="18:00").pack(),
+        callback_data=CategoryDeliveryCb(action="preset", mode="daily", value="18-00").pack(),
     )
     builder.button(
         text="своё время (HH:MM)",
@@ -446,7 +446,7 @@ def build_router(deps: UiDeps) -> Router:
         if mode == "interval":
             interval = int(callback_data.value or "0")
         if mode == "daily":
-            time_local = callback_data.value
+            time_local = (callback_data.value or "").replace("-", ":")
         await state.update_data(
             delivery_mode=mode, delivery_interval=interval, delivery_time=time_local
         )

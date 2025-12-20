@@ -77,9 +77,9 @@ def _build_delivery_kb(category: str, mode: str, enabled: bool) -> types.InlineK
     builder.button(text=instant_label, callback_data=DeliveryCb(action="instant_toggle", category=category).pack())
     builder.button(text=digest_label, callback_data=DeliveryCb(action="digest_toggle", category=category).pack())
     builder.button(text="каждый час", callback_data=DeliveryCb(action="preset", category=category, value="hourly").pack())
-    builder.button(text="каждые 3 часа", callback_data=DeliveryCb(action="preset", category=category, value="interval:180").pack())
-    builder.button(text="ежедневно 08:00", callback_data=DeliveryCb(action="preset", category=category, value="daily:08:00").pack())
-    builder.button(text="ежедневно 18:00", callback_data=DeliveryCb(action="preset", category=category, value="daily:18:00").pack())
+    builder.button(text="каждые 3 часа", callback_data=DeliveryCb(action="preset", category=category, value="interval|180").pack())
+    builder.button(text="ежедневно 08:00", callback_data=DeliveryCb(action="preset", category=category, value="daily|08-00").pack())
+    builder.button(text="ежедневно 18:00", callback_data=DeliveryCb(action="preset", category=category, value="daily|18-00").pack())
     builder.button(text="своё время (HH:MM)", callback_data=DeliveryCb(action="custom", category=category).pack())
     builder.button(text="📨 Отправить тестовый дайджест сейчас", callback_data=DeliveryCb(action="test_digest", category=category).pack())
     builder.button(text="⬅️ Назад", callback_data=DeliveryCb(action="menu").pack())
@@ -196,12 +196,12 @@ def build_router(deps: UiDeps) -> Router:
         mode = value
         interval = None
         time_local = None
-        if value.startswith("interval:"):
+        if value.startswith("interval|"):
             mode = "interval"
-            interval = int(value.split(":", 1)[1])
-        if value.startswith("daily:"):
+            interval = int(value.split("|", 1)[1])
+        if value.startswith("daily|"):
             mode = "daily"
-            time_local = value.split(":", 1)[1]
+            time_local = value.split("|", 1)[1].replace("-", ":")
         await asyncio.to_thread(
             deps.admin_repo.set_delivery_for_category,
             callback_data.category,
