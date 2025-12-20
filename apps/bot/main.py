@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -13,8 +12,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from dotenv import load_dotenv
-
+from src.infrastructure.config import load_bot_settings, load_env_file
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -48,25 +46,15 @@ async def main() -> None:
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
-    load_dotenv(dotenv_path=DOTENV_PATH)
-
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
-    if not token:
-        raise RuntimeError("TELEGRAM_BOT_TOKEN is required for the bot")
-    admin_user_id = int(os.getenv("TELEGRAM_ADMIN_USER_ID", "0"))
-    default_tz = os.getenv("DEFAULT_TZ", "Europe/Berlin")
-    telethon_api_id = int(os.getenv("TELEGRAM_API_ID", "0"))
-    telethon_api_hash = os.getenv("TELEGRAM_API_HASH")
-    session_name = os.getenv("TELETHON_SESSION_NAME", "pulsedidgest")
-    telethon_dialog_limit = int(os.getenv("TELETHON_DIALOGS_LIMIT", "200"))
-    gemini_model = os.getenv("GEMINI_MODEL", "models/gemini-flash-latest")
-    gemini_cooldown = os.getenv("GEMINI_COOLDOWN_SECONDS", "60")
-    config_sync_mode = os.getenv("CONFIG_SYNC_MODE", "seed_if_empty")
-    delivery_tick = os.getenv("DELIVERY_TICK_SECONDS", "60")
-    if not telethon_api_id or not telethon_api_hash:
-        raise RuntimeError(
-            "TELEGRAM_API_ID and TELEGRAM_API_HASH are required for Telethon-based group management"
-        )
+    load_env_file(DOTENV_PATH)
+    settings = load_bot_settings()
+    token = settings.token
+    admin_user_id = settings.admin_user_id
+    default_tz = settings.default_tz
+    telethon_api_id = settings.telethon_api_id
+    telethon_api_hash = settings.telethon_api_hash
+    session_name = settings.session_name
+    telethon_dialog_limit = settings.telethon_dialog_limit
 
     bot = Bot(token=token)
     dp = Dispatcher(storage=MemoryStorage())
@@ -98,10 +86,10 @@ async def main() -> None:
             "DEFAULT_TZ": default_tz,
             "TELETHON_SESSION": session_name,
             "TELETHON_DIALOGS_LIMIT": str(telethon_dialog_limit),
-            "GEMINI_MODEL": gemini_model,
-            "GEMINI_COOLDOWN_SECONDS": gemini_cooldown,
-            "CONFIG_SYNC_MODE": config_sync_mode,
-            "DELIVERY_TICK_SECONDS": delivery_tick,
+            "GEMINI_MODEL": settings.gemini_model,
+            "GEMINI_COOLDOWN_SECONDS": str(settings.gemini_cooldown_seconds),
+            "CONFIG_SYNC_MODE": settings.config_sync_mode,
+            "DELIVERY_TICK_SECONDS": str(settings.delivery_tick_seconds),
         },
         logger=logging.getLogger("bot.ui"),
     )

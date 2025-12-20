@@ -5,8 +5,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
-
-from src.infrastructure.llm_gemini import GeminiFilterClient
+from typing import Protocol
 
 PROMPT_NAME = "default"
 PROMPT_VERSION = "v1"
@@ -32,12 +31,19 @@ class GeminiFilterDecision:
     prompt_version: str
 
 
+class GeminiClientProtocol(Protocol):
+    model_name: str
+
+    def generate_json(self, prompt: str) -> str:
+        ...
+
+
 class FilterMessageWithGeminiUseCase:
     """Runs message text through Gemini and returns classification."""
 
     def __init__(
         self,
-        gemini_client: GeminiFilterClient,
+        gemini_client: GeminiClientProtocol,
         logger: logging.Logger | None = None,
     ) -> None:
         self._gemini_client = gemini_client

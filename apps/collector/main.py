@@ -3,9 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import sys
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -14,8 +12,6 @@ from google.api_core import exceptions as google_exceptions
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
-
-from dotenv import load_dotenv
 
 from src.application.services.digest_engine import DigestDeliveryEngine
 from src.application.services.notifier import DebugThrottle, UserNotifier
@@ -39,29 +35,13 @@ from src.infrastructure.db.repositories import (
     SQLAlchemyMessageDecisionRepository,
     SQLAlchemyUserRepository,
 )
+from src.infrastructure.config import load_collector_settings, load_env_file
 from src.infrastructure.llm_gemini import GeminiFilterClient
 from src.infrastructure.telegram_bot import TelegramBotSender
 from src.infrastructure.telegram_client.collector_client import TelegramCollectorClient
 
-DEFAULT_SESSION_NAME = "pulsedidgest"
 DOTENV_PATH = PROJECT_ROOT / ".env"
 CATEGORIES_CONFIG = PROJECT_ROOT / "config" / "categories.yml"
-
-
-@dataclass
-class CollectorSettings:
-    api_id: int
-    api_hash: str
-    source_chat: str
-    session_name: str
-    gemini_api_key: str
-    gemini_model: str | None
-    gemini_cooldown_seconds: int
-    bot_token: str | None
-    admin_user_id: int | None
-    default_tz: str
-    config_sync_mode: str
-    delivery_tick_seconds: int
 
 
 class GeminiCooldownManager:
@@ -93,68 +73,6 @@ class GeminiCooldownManager:
         return max(0, int(remaining))
 
 
-def load_settings() -> CollectorSettings:
-    api_id = _require_env("TELEGRAM_API_ID")
-    api_hash = _require_env("TELEGRAM_API_HASH")
-    source_chat = _require_env("TELEGRAM_SOURCE_CHAT")
-    session_name = os.getenv("TELETHON_SESSION_NAME", DEFAULT_SESSION_NAME)
-    gemini_api_key = _require_env("GEMINI_API_KEY")
-    gemini_model = os.getenv("GEMINI_MODEL") or None
-    cooldown_raw = os.getenv("GEMINI_COOLDOWN_SECONDS", "60")
-    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    admin_user_id = os.getenv("TELEGRAM_ADMIN_USER_ID")
-    default_tz = os.getenv("DEFAULT_TZ", "Europe/Berlin")
-    config_mode = os.getenv("CONFIG_SYNC_MODE", "seed_if_empty")
-    delivery_tick_raw = os.getenv("DELIVERY_TICK_SECONDS", "60")
-    _require_env("DATABASE_URL")
-
-    try:
-        api_id_int = int(api_id)
-    except ValueError as exc:  # pragma: no cover - validation guard
-        raise ValueError("TELEGRAM_API_ID must be an integer") from exc
-
-    try:
-        cooldown_seconds = max(0, int(cooldown_raw))
-    except ValueError as exc:  # pragma: no cover
-        raise ValueError("GEMINI_COOLDOWN_SECONDS must be an integer") from exc
-
-    admin_user_id_int = None
-    if admin_user_id:
-        try:
-            admin_user_id_int = int(admin_user_id)
-        except ValueError as exc:
-            raise ValueError("TELEGRAM_ADMIN_USER_ID must be an integer") from exc
-
-    try:
-        delivery_tick_seconds = max(15, int(delivery_tick_raw))
-    except ValueError as exc:
-        raise ValueError("DELIVERY_TICK_SECONDS must be an integer") from exc
-
-    return CollectorSettings(
-        api_id=api_id_int,
-        api_hash=api_hash,
-        source_chat=source_chat,
-        session_name=session_name,
-        gemini_api_key=gemini_api_key,
-        gemini_model=gemini_model,
-        gemini_cooldown_seconds=cooldown_seconds,
-        bot_token=bot_token,
-        admin_user_id=admin_user_id_int,
-        default_tz=default_tz,
-        config_sync_mode=config_mode,
-        delivery_tick_seconds=delivery_tick_seconds,
-    )
-
-
-def load_env_file() -> None:
-    load_dotenv(dotenv_path=DOTENV_PATH)
-
-
-def _require_env(var_name: str) -> str:
-    value = os.getenv(var_name)
-    if not value:
-        raise RuntimeError(f"Environment variable {var_name} is required")
-    return value
 
 
 async def run_collector(settings: CollectorSettings) -> None:
@@ -392,8 +310,8 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
-    load_env_file()
-    settings = load_settings()
+    load_env_file(DOTENV_PATH)
+    settings = load_collector_settings()
     try:
         asyncio.run(run_collector(settings))
     except KeyboardInterrupt:  # pragma: no cover - graceful exit
