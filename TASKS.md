@@ -7,7 +7,7 @@
 - Bot UI for managing categories and groups
 
 ## In Progress
-- (пусто)
+- Уточнить задачу «upgrade»: что конкретно нужно обновить?
 
 ## Done
 - Project initialization (clean architecture + docs) — структура репо и базовые спецификации
@@ -18,6 +18,8 @@
 - Telegram Bot + Instant Delivery (MVP) — /start-регистрация и отправка pass=True решений пользователям
 - Delivery Engine (instant + digest) — расписания hourly/interval/daily, cooldown и debug-уведомления
 - Group management via Telethon — админ-бот управляет группами без forward
+- Maintenance: reviewed project docs and set next task for group discovery
+- Maintenance: merged feature/category-show-handler into dev
 
 ## Next
-- Telegram Bot UX polish + per-user delivery settings
+- Group discovery: add group by name via Telethon
