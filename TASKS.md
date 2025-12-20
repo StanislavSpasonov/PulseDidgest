@@ -22,6 +22,7 @@
 - Bot UI v1 (inline keyboard + wizard) — /start и /menu ведут в UI, категории/группы/привязки/доставка/отчёты/настройки
 - Fix: digest preset callback values without ':' to avoid aiogram errors
 - Fix: category callbacks use IDs to avoid 64-byte limit
+- Quality sweep: cleanup, config refactor, tests, docs
 
 ## Next
 - QA: проверить Bot UI v1 по acceptance criteria и собрать баги/фиксы

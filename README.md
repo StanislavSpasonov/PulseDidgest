@@ -105,3 +105,14 @@ Collector использует `DATABASE_URL` во время запуска и 
 - `CONFIG_SYNC_MODE` — `seed_if_empty` (по умолчанию) или `off`
 - `DELIVERY_TICK_SECONDS` — частота проверки digest-расписаний (по умолчанию 60 секунд)
 - `DATABASE_URL` — строка подключения к PostgreSQL (например `postgresql+psycopg://user:password@localhost:5432/pulsedidgest`)
+
+## Dev: setup + run + tests
+
+1. Создать виртуальное окружение: `python -m venv .venv`
+2. Активировать его: `source .venv/bin/activate`
+3. Установить зависимости: `pip install -r requirements.txt`
+4. Подготовить env: `cp .env.example .env` и заполнить значения
+5. Запуск:
+   - collector: `python apps/collector/main.py`
+   - bot: `python apps/bot/main.py`
+6. Тесты: `python -m pytest -q`
