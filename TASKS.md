@@ -28,6 +28,7 @@
 - UI: one-column list keyboards + truncation helper
 - Fix: link selection callbacks shortened + navigation state cleared
 - Tests: navigation layout (list keyboard back/home ordering)
+- Logging: collector pipeline diagnostics (bindings/persist/decisions)
 
 ## Next
 - QA: проверить Bot UI v1 по acceptance criteria и собрать баги/фиксы

@@ -107,6 +107,11 @@ async def run_collector(settings: CollectorSettings) -> None:
         logger=logger,
     )
     category_registry = sync_use_case.execute()
+    logger.info(
+        "Category registry loaded: %s chats, mode=%s",
+        len(category_registry.chat_to_categories),
+        settings.config_sync_mode,
+    )
 
     notifier: UserNotifier | None = None
     bot_sender: TelegramBotSender | None = None
@@ -182,8 +187,18 @@ async def run_collector(settings: CollectorSettings) -> None:
 
         bindings = category_registry.get_categories_for_chat(chat_id)
         if not bindings:
-            logger.debug("No categories configured for chat %s", chat_id)
+            logger.warning(
+                "No categories configured for chat %s. "
+                "Check TELEGRAM_SOURCE_CHAT and restart collector after adding bindings.",
+                chat_id,
+            )
             return
+        logger.info(
+            "Bindings for chat %s: %s categories (%s)",
+            chat_id,
+            len(bindings),
+            ", ".join(binding.category_name for binding in bindings),
+        )
 
         message_record = MessageRecord(
             source_chat_id=chat_id,
@@ -191,7 +206,14 @@ async def run_collector(settings: CollectorSettings) -> None:
             date=getattr(message, "date", None) or datetime.utcnow(),
             text=message_text,
         )
-        await store_use_case.ensure_message(message_record)
+        message_db_id = await store_use_case.ensure_message(message_record)
+        if message_db_id:
+            logger.debug(
+                "Message stored chat=%s message_id=%s db_id=%s",
+                chat_id,
+                source_message_id,
+                message_db_id,
+            )
 
         for binding in bindings:
             if not binding.is_enabled:
@@ -260,6 +282,13 @@ async def run_collector(settings: CollectorSettings) -> None:
             if save_result is None:
                 continue
             _, decision_db_id = save_result
+            logger.info(
+                "Decision stored category=%s pass=%s score=%.2f decision_id=%s",
+                binding.category_name,
+                decision_record.passed,
+                decision_record.score,
+                decision_db_id,
+            )
 
             if (
                 decision_record.passed
