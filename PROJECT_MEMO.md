@@ -22,3 +22,4 @@
 
 ## Quality Sweep
 Quality sweep выполнен. Тесты запускаются командой: `python -m pytest -q`.
+Добавлены unit-тесты для ключевых use cases (prefilter, delivery, telethon discovery).
