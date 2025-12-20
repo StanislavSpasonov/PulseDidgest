@@ -60,7 +60,7 @@ def _format_categories_list(
         label = f"{category.name} ({'debug on' if category.debug_enabled else 'debug off'})"
         builder.button(
             text=label,
-            callback_data=CategoryCb(action="detail", name=category.name).pack(),
+            callback_data=CategoryCb(action="detail", category_id=str(category.id)).pack(),
         )
     if page_obj.total == 0:
         lines.append("Пока нет категорий.")
@@ -114,14 +114,32 @@ def _format_category_detail(category, links) -> Tuple[str, types.InlineKeyboardM
                 f"enabled={link.is_enabled}"
             )
     builder = InlineKeyboardBuilder()
-    builder.button(text="🧾 Показать промпт", callback_data=CategoryCb(action="show_prompt", name=category.name).pack())
-    builder.button(text="✏️ Изменить промпт", callback_data=CategoryCb(action="edit_prompt", name=category.name).pack())
-    builder.button(text="✏️ Переименовать", callback_data=CategoryCb(action="rename", name=category.name).pack())
+    builder.button(
+        text="🧾 Показать промпт",
+        callback_data=CategoryCb(action="show_prompt", category_id=str(category.id)).pack(),
+    )
+    builder.button(
+        text="✏️ Изменить промпт",
+        callback_data=CategoryCb(action="edit_prompt", category_id=str(category.id)).pack(),
+    )
+    builder.button(
+        text="✏️ Переименовать",
+        callback_data=CategoryCb(action="rename", category_id=str(category.id)).pack(),
+    )
     toggle_text = "🧪 Debug OFF" if category.debug_enabled else "🧪 Debug ON"
-    builder.button(text=toggle_text, callback_data=CategoryCb(action="toggle_debug", name=category.name).pack())
-    builder.button(text="🔗 Источники", callback_data=LinkCb(action="category", category=category.name).pack())
-    builder.button(text="🚚 Доставка", callback_data=DeliveryCb(action="category", category=category.name).pack())
-    builder.button(text="🗑 Удалить", callback_data=CategoryCb(action="delete_confirm", name=category.name).pack())
+    builder.button(
+        text=toggle_text,
+        callback_data=CategoryCb(action="toggle_debug", category_id=str(category.id)).pack(),
+    )
+    builder.button(
+        text="🔗 Источники",
+        callback_data=LinkCb(action="category", category_id=str(category.id)).pack(),
+    )
+    builder.button(
+        text="🚚 Доставка",
+        callback_data=DeliveryCb(action="category", category_id=str(category.id)).pack(),
+    )
+    builder.button(text="🗑 Удалить", callback_data=CategoryCb(action="delete_confirm", category_id=str(category.id)).pack())
     builder.button(text="⬅️ Назад", callback_data=CategoryCb(action="list", page=0).pack())
     builder.button(text="🏠 Домой", callback_data=NavCb(action="home").pack())
     builder.adjust(2)
@@ -298,7 +316,7 @@ def build_router(deps: UiDeps) -> Router:
             return
         try:
             category, links = await asyncio.to_thread(
-                deps.admin_repo.get_category_details, callback_data.name
+                deps.admin_repo.get_category_details_by_id, callback_data.category_id
             )
         except Exception as exc:
             await respond(callback, f"Не удалось загрузить категорию: {exc}")
@@ -535,7 +553,7 @@ def build_router(deps: UiDeps) -> Router:
     async def handle_show_prompt(callback: types.CallbackQuery, callback_data: CategoryCb) -> None:
         try:
             category, _ = await asyncio.to_thread(
-                deps.admin_repo.get_category_details, callback_data.name
+                deps.admin_repo.get_category_details_by_id, callback_data.category_id
             )
         except Exception as exc:
             await respond(callback, f"Не удалось загрузить категорию: {exc}")
@@ -543,7 +561,7 @@ def build_router(deps: UiDeps) -> Router:
         text = category.prompt or "<empty>"
         builder = InlineKeyboardBuilder()
         builder.button(
-            text="⬅️ Назад", callback_data=CategoryCb(action="detail", name=category.name).pack()
+            text="⬅️ Назад", callback_data=CategoryCb(action="detail", category_id=str(category.id)).pack()
         )
         builder.button(text="🏠 Домой", callback_data=NavCb(action="home").pack())
         builder.adjust(2)
@@ -551,12 +569,15 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(CategoryCb.filter(F.action == "edit_prompt"))
     async def handle_edit_prompt(callback: types.CallbackQuery, callback_data: CategoryCb, state: FSMContext) -> None:
+        category = await asyncio.to_thread(
+            deps.admin_repo.get_category_by_id, callback_data.category_id
+        )
         await state.set_state(CategoryEditState.prompt)
-        await state.update_data(category=callback_data.name)
+        await state.update_data(category=category.name)
         await respond(
             callback,
-            f"Введите новый промпт для '{callback_data.name}':",
-            _nav_buttons(CategoryCb(action="detail", name=callback_data.name).pack()),
+            f"Введите новый промпт для '{category.name}':",
+            _nav_buttons(CategoryCb(action="detail", category_id=str(category.id)).pack()),
         )
 
     @router.message(CategoryEditState.prompt)
@@ -578,12 +599,15 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(CategoryCb.filter(F.action == "rename"))
     async def handle_rename(callback: types.CallbackQuery, callback_data: CategoryCb, state: FSMContext) -> None:
+        category = await asyncio.to_thread(
+            deps.admin_repo.get_category_by_id, callback_data.category_id
+        )
         await state.set_state(CategoryEditState.rename)
-        await state.update_data(category=callback_data.name)
+        await state.update_data(category=category.name)
         await respond(
             callback,
-            f"Введите новое имя для '{callback_data.name}':",
-            _nav_buttons(CategoryCb(action="detail", name=callback_data.name).pack()),
+            f"Введите новое имя для '{category.name}':",
+            _nav_buttons(CategoryCb(action="detail", category_id=str(category.id)).pack()),
         )
 
     @router.message(CategoryEditState.rename)
@@ -609,8 +633,8 @@ def build_router(deps: UiDeps) -> Router:
     @router.callback_query(CategoryCb.filter(F.action == "toggle_debug"))
     async def handle_toggle_debug(callback: types.CallbackQuery, callback_data: CategoryCb) -> None:
         try:
-            category, _ = await asyncio.to_thread(
-                deps.admin_repo.get_category_details, callback_data.name
+            category = await asyncio.to_thread(
+                deps.admin_repo.get_category_by_id, callback_data.category_id
             )
             new_value = not category.debug_enabled
             await asyncio.to_thread(deps.admin_repo.set_category_debug, category.name, new_value)
@@ -625,25 +649,31 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(CategoryCb.filter(F.action == "delete_confirm"))
     async def handle_delete_confirm(callback: types.CallbackQuery, callback_data: CategoryCb) -> None:
+        category = await asyncio.to_thread(
+            deps.admin_repo.get_category_by_id, callback_data.category_id
+        )
         builder = InlineKeyboardBuilder()
         builder.button(
             text="Да, удалить",
-            callback_data=CategoryCb(action="delete_yes", name=callback_data.name).pack(),
+            callback_data=CategoryCb(action="delete_yes", category_id=str(category.id)).pack(),
         )
         builder.button(
             text="Отмена",
-            callback_data=CategoryCb(action="detail", name=callback_data.name).pack(),
+            callback_data=CategoryCb(action="detail", category_id=str(category.id)).pack(),
         )
         builder.button(text="🏠 Домой", callback_data=NavCb(action="home").pack())
         builder.adjust(1)
-        await respond(callback, f"Удалить категорию '{callback_data.name}'?", builder.as_markup())
+        await respond(callback, f"Удалить категорию '{category.name}'?", builder.as_markup())
 
     @router.callback_query(CategoryCb.filter(F.action == "delete_yes"))
     async def handle_delete_yes(callback: types.CallbackQuery, callback_data: CategoryCb) -> None:
         try:
-            await asyncio.to_thread(deps.admin_repo.delete_category, callback_data.name)
-            deps.logger.info("Category deleted via UI: %s", callback_data.name)
-            await respond(callback, f"Категория '{callback_data.name}' удалена.", _build_categories_menu())
+            category = await asyncio.to_thread(
+                deps.admin_repo.get_category_by_id, callback_data.category_id
+            )
+            await asyncio.to_thread(deps.admin_repo.delete_category, category.name)
+            deps.logger.info("Category deleted via UI: %s", category.name)
+            await respond(callback, f"Категория '{category.name}' удалена.", _build_categories_menu())
         except Exception as exc:
             await respond(callback, f"Не удалось удалить: {exc}")
 

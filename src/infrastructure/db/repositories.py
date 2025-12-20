@@ -457,6 +457,35 @@ class SQLAlchemyAdminRepository:
         finally:
             session.close()
 
+    def get_category_by_id(self, category_id: str) -> CategoryModel:
+        session = self._session_factory()
+        try:
+            category = session.execute(
+                select(CategoryModel).where(CategoryModel.id == uuid.UUID(category_id))
+            ).scalar_one_or_none()
+            if category is None:
+                raise ValueError("Category not found")
+            return category
+        finally:
+            session.close()
+
+    def get_category_details_by_id(self, category_id: str):
+        session = self._session_factory()
+        try:
+            category = session.execute(
+                select(CategoryModel).where(CategoryModel.id == uuid.UUID(category_id))
+            ).scalar_one_or_none()
+            if category is None:
+                raise ValueError("Category not found")
+            stmt = (
+                select(CategoryGroupModel, SourceGroupModel)
+                .join(SourceGroupModel, SourceGroupModel.id == CategoryGroupModel.group_id)
+                .where(CategoryGroupModel.category_id == category.id)
+            )
+            return category, session.execute(stmt).all()
+        finally:
+            session.close()
+
     def create_category(self, name: str) -> None:
         session = self._session_factory()
         try:

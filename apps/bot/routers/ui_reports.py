@@ -33,7 +33,7 @@ def _build_categories_list(categories, action: str, page: int) -> Tuple[str, typ
     for category in page_obj.items:
         builder.button(
             text=category.name,
-            callback_data=ReportCb(action=action, category=category.name).pack(),
+            callback_data=ReportCb(action=action, category_id=str(category.id)).pack(),
         )
     if page_obj.total_pages > 1:
         prev_page, next_page = page_bounds(page_obj.page, page_obj.total_pages)
@@ -61,21 +61,21 @@ def _build_categories_list(categories, action: str, page: int) -> Tuple[str, typ
     return "\n".join(lines), builder.as_markup()
 
 
-def _build_limit_kb(action: str, category: str) -> types.InlineKeyboardMarkup:
+def _build_limit_kb(action: str, category_id: str) -> types.InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="10", callback_data=ReportCb(action=action, category=category, value="10").pack())
-    builder.button(text="50", callback_data=ReportCb(action=action, category=category, value="50").pack())
+    builder.button(text="10", callback_data=ReportCb(action=action, category_id=category_id, value="10").pack())
+    builder.button(text="50", callback_data=ReportCb(action=action, category_id=category_id, value="50").pack())
     builder.button(text="⬅️ Назад", callback_data=ReportCb(action="menu").pack())
     builder.button(text="🏠 Домой", callback_data=NavCb(action="home").pack())
     builder.adjust(2)
     return builder.as_markup()
 
 
-def _build_period_kb(action: str, category: str = "") -> types.InlineKeyboardMarkup:
+def _build_period_kb(action: str, category_id: str = "") -> types.InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    builder.button(text="1 час", callback_data=ReportCb(action=action, category=category, value="1").pack())
-    builder.button(text="24 часа", callback_data=ReportCb(action=action, category=category, value="24").pack())
-    builder.button(text="7 дней", callback_data=ReportCb(action=action, category=category, value="168").pack())
+    builder.button(text="1 час", callback_data=ReportCb(action=action, category_id=category_id, value="1").pack())
+    builder.button(text="24 часа", callback_data=ReportCb(action=action, category_id=category_id, value="24").pack())
+    builder.button(text="7 дней", callback_data=ReportCb(action=action, category_id=category_id, value="168").pack())
     builder.button(text="⬅️ Назад", callback_data=ReportCb(action="menu").pack())
     builder.button(text="🏠 Домой", callback_data=NavCb(action="home").pack())
     builder.adjust(2)
@@ -180,8 +180,8 @@ def build_router(deps: UiDeps) -> Router:
             return
         await respond(
             callback,
-            f"Выберите лимит для {callback_data.category}:",
-            _build_limit_kb(callback_data.action + "_run", callback_data.category),
+            "Выберите лимит:",
+            _build_limit_kb(callback_data.action + "_run", callback_data.category_id),
         )
 
     @router.callback_query(ReportCb.filter(F.action.in_(["last_pass_run", "last_fail_run"])))
@@ -191,10 +191,13 @@ def build_router(deps: UiDeps) -> Router:
             return
         passed = callback_data.action == "last_pass_run"
         limit = int(callback_data.value or "10")
-        rows = await asyncio.to_thread(
-            deps.admin_repo.last_decisions, callback_data.category, passed, limit
+        category = await asyncio.to_thread(
+            deps.admin_repo.get_category_by_id, callback_data.category_id
         )
-        title = f"Последние {'прошедшие' if passed else 'отклонённые'}: {callback_data.category}"
+        rows = await asyncio.to_thread(
+            deps.admin_repo.last_decisions, category.name, passed, limit
+        )
+        title = f"Последние {'прошедшие' if passed else 'отклонённые'}: {category.name}"
         text = _format_decisions(title, rows)
         builder = InlineKeyboardBuilder()
         builder.button(text="⬅️ Назад", callback_data=ReportCb(action="menu").pack())
@@ -230,8 +233,8 @@ def build_router(deps: UiDeps) -> Router:
             return
         await respond(
             callback,
-            f"Выберите период для {callback_data.category}:",
-            _build_period_kb("summary_run", callback_data.category),
+            "Выберите период:",
+            _build_period_kb("summary_run", callback_data.category_id),
         )
 
     @router.callback_query(ReportCb.filter(F.action == "summary_run"))
@@ -240,10 +243,13 @@ def build_router(deps: UiDeps) -> Router:
             await respond(callback, "Меню доступно только администраторам.")
             return
         hours = int(callback_data.value or "24")
-        pass_count, fail_count, rows = await asyncio.to_thread(
-            deps.admin_repo.report_category, callback_data.category, hours, 10
+        category = await asyncio.to_thread(
+            deps.admin_repo.get_category_by_id, callback_data.category_id
         )
-        title = f"Сводка {callback_data.category} ({hours}ч): pass={pass_count} fail={fail_count}"
+        pass_count, fail_count, rows = await asyncio.to_thread(
+            deps.admin_repo.report_category, category.name, hours, 10
+        )
+        title = f"Сводка {category.name} ({hours}ч): pass={pass_count} fail={fail_count}"
         text = _format_decisions(title, rows)
         builder = InlineKeyboardBuilder()
         builder.button(text="⬅️ Назад", callback_data=ReportCb(action="menu").pack())
@@ -257,8 +263,8 @@ def build_router(deps: UiDeps) -> Router:
             await respond(callback, "Меню доступно только администраторам.")
             return
         try:
-            category, _ = await asyncio.to_thread(
-                deps.admin_repo.get_category_details, callback_data.category
+            category = await asyncio.to_thread(
+                deps.admin_repo.get_category_by_id, callback_data.category_id
             )
             new_value = not category.debug_enabled
             await asyncio.to_thread(deps.admin_repo.set_category_debug, category.name, new_value)

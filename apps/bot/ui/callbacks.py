@@ -9,7 +9,7 @@ class NavCb(CallbackData, prefix="nav"):
 
 class CategoryCb(CallbackData, prefix="cat"):
     action: str
-    name: str = ""
+    category_id: str = ""
     page: int = 0
 
 
@@ -38,20 +38,20 @@ class GroupSearchCb(CallbackData, prefix="grps"):
 
 class LinkCb(CallbackData, prefix="link"):
     action: str
-    category: str = ""
+    category_id: str = ""
     chat_id: int = 0
     page: int = 0
 
 
 class DeliveryCb(CallbackData, prefix="del"):
     action: str
-    category: str = ""
+    category_id: str = ""
     value: str = ""
 
 
 class ReportCb(CallbackData, prefix="rep"):
     action: str
-    category: str = ""
+    category_id: str = ""
     value: str = ""
 
 

@@ -27,7 +27,7 @@ def _build_categories_list(categories, page: int, per_page: int) -> Tuple[str, t
     for category in page_obj.items:
         builder.button(
             text=category.name,
-            callback_data=LinkCb(action="category", category=category.name).pack(),
+            callback_data=LinkCb(action="category", category_id=str(category.id)).pack(),
         )
     if page_obj.total_pages > 1:
         prev_page, next_page = page_bounds(page_obj.page, page_obj.total_pages)
@@ -54,7 +54,7 @@ def _build_categories_list(categories, page: int, per_page: int) -> Tuple[str, t
     return "\n".join(lines), builder.as_markup()
 
 
-def _build_category_links_detail(category_name: str, links) -> Tuple[str, types.InlineKeyboardMarkup]:
+def _build_category_links_detail(category_name: str, category_id: str, links) -> Tuple[str, types.InlineKeyboardMarkup]:
     lines = [f"Источники категории {category_name}:"]
     if not links:
         lines.append("(нет привязок)")
@@ -66,11 +66,11 @@ def _build_category_links_detail(category_name: str, links) -> Tuple[str, types.
     builder = InlineKeyboardBuilder()
     builder.button(
         text="➕ Добавить источники",
-        callback_data=LinkCb(action="add", category=category_name).pack(),
+        callback_data=LinkCb(action="add", category_id=category_id).pack(),
     )
     builder.button(
         text="➖ Удалить источники",
-        callback_data=LinkCb(action="remove", category=category_name).pack(),
+        callback_data=LinkCb(action="remove", category_id=category_id).pack(),
     )
     builder.button(text="⬅️ Назад", callback_data=LinkCb(action="menu").pack())
     builder.button(text="🏠 Домой", callback_data=NavCb(action="home").pack())
@@ -79,7 +79,7 @@ def _build_category_links_detail(category_name: str, links) -> Tuple[str, types.
 
 
 def _build_groups_select_kb(
-    groups, selected: Set[int], page: int, per_page: int, mode: str, category: str
+    groups, selected: Set[int], page: int, per_page: int, mode: str, category_id: str
 ) -> Tuple[str, types.InlineKeyboardMarkup]:
     page_obj = paginate(groups, page, per_page)
     builder = InlineKeyboardBuilder()
@@ -93,7 +93,7 @@ def _build_groups_select_kb(
             text=f"{mark} {label}",
             callback_data=LinkCb(
                 action=f"{mode}_toggle",
-                category=category,
+                category_id=category_id,
                 chat_id=int(group.tg_chat_id),
                 page=page_obj.page,
             ).pack(),
@@ -106,7 +106,7 @@ def _build_groups_select_kb(
                 types.InlineKeyboardButton(
                     text="⬅️ Prev",
                     callback_data=LinkCb(
-                        action=f"{mode}_page", category=category, page=prev_page
+                        action=f"{mode}_page", category_id=category_id, page=prev_page
                     ).pack(),
                 )
             )
@@ -115,7 +115,7 @@ def _build_groups_select_kb(
                 types.InlineKeyboardButton(
                     text="Next ➡️",
                     callback_data=LinkCb(
-                        action=f"{mode}_page", category=category, page=next_page
+                        action=f"{mode}_page", category_id=category_id, page=next_page
                     ).pack(),
                 )
             )
@@ -124,13 +124,13 @@ def _build_groups_select_kb(
     builder.row(
         types.InlineKeyboardButton(
             text="Сохранить",
-            callback_data=LinkCb(action=f"{mode}_save", category=category).pack(),
+            callback_data=LinkCb(action=f"{mode}_save", category_id=category_id).pack(),
         )
     )
     builder.row(
         types.InlineKeyboardButton(
             text="⬅️ Назад",
-            callback_data=LinkCb(action="category", category=category).pack(),
+            callback_data=LinkCb(action="category", category_id=category_id).pack(),
         ),
         types.InlineKeyboardButton(text="🏠 Домой", callback_data=NavCb(action="home").pack()),
     )
@@ -155,13 +155,13 @@ def build_router(deps: UiDeps) -> Router:
             await respond(callback, "Меню доступно только администраторам.")
             return
         try:
-            _, links = await asyncio.to_thread(
-                deps.admin_repo.get_category_details, callback_data.category
+            category, links = await asyncio.to_thread(
+                deps.admin_repo.get_category_details_by_id, callback_data.category_id
             )
         except Exception as exc:
             await respond(callback, f"Не удалось загрузить категорию: {exc}")
             return
-        text, kb = _build_category_links_detail(callback_data.category, links)
+        text, kb = _build_category_links_detail(category.name, str(category.id), links)
         await respond(callback, text, kb)
 
     @router.callback_query(LinkCb.filter(F.action == "add"))
@@ -170,15 +170,15 @@ def build_router(deps: UiDeps) -> Router:
             await respond(callback, "Меню доступно только администраторам.")
             return
         await state.set_state(LinkSelectState.add_select)
-        await state.update_data(category=callback_data.category, selected_chat_ids=[])
+        await state.update_data(category_id=callback_data.category_id, selected_chat_ids=[])
         groups = await asyncio.to_thread(deps.admin_repo.list_groups)
         _, links = await asyncio.to_thread(
-            deps.admin_repo.get_category_details, callback_data.category
+            deps.admin_repo.get_category_details_by_id, callback_data.category_id
         )
         bound_ids = {int(group.tg_chat_id) for _, group in links}
         available = [g for g in groups if int(g.tg_chat_id) not in bound_ids]
         text, kb = _build_groups_select_kb(
-            available, set(), 0, 6, "add", callback_data.category
+            available, set(), 0, 6, "add", callback_data.category_id
         )
         await respond(callback, text, kb)
 
@@ -188,13 +188,13 @@ def build_router(deps: UiDeps) -> Router:
             await respond(callback, "Меню доступно только администраторам.")
             return
         await state.set_state(LinkSelectState.remove_select)
-        await state.update_data(category=callback_data.category, selected_chat_ids=[])
+        await state.update_data(category_id=callback_data.category_id, selected_chat_ids=[])
         _, links = await asyncio.to_thread(
-            deps.admin_repo.get_category_details, callback_data.category
+            deps.admin_repo.get_category_details_by_id, callback_data.category_id
         )
         groups = [group for _, group in links]
         text, kb = _build_groups_select_kb(
-            groups, set(), 0, 6, "remove", callback_data.category
+            groups, set(), 0, 6, "remove", callback_data.category_id
         )
         await respond(callback, text, kb)
 
@@ -205,17 +205,21 @@ def build_router(deps: UiDeps) -> Router:
             return
         data = await state.get_data()
         selected = set(data.get("selected_chat_ids", []))
-        category = data.get("category", "")
+        category_id = data.get("category_id", "")
         if callback_data.chat_id in selected:
             selected.remove(callback_data.chat_id)
         else:
             selected.add(callback_data.chat_id)
         await state.update_data(selected_chat_ids=list(selected))
         groups = await asyncio.to_thread(deps.admin_repo.list_groups)
-        _, links = await asyncio.to_thread(deps.admin_repo.get_category_details, category)
+        _, links = await asyncio.to_thread(
+            deps.admin_repo.get_category_details_by_id, category_id
+        )
         bound_ids = {int(group.tg_chat_id) for _, group in links}
         available = [g for g in groups if int(g.tg_chat_id) not in bound_ids]
-        text, kb = _build_groups_select_kb(available, selected, callback_data.page, 6, "add", category)
+        text, kb = _build_groups_select_kb(
+            available, selected, callback_data.page, 6, "add", category_id
+        )
         await respond(callback, text, kb)
 
     @router.callback_query(LinkCb.filter(F.action == "remove_toggle"), LinkSelectState.remove_select)
@@ -225,15 +229,19 @@ def build_router(deps: UiDeps) -> Router:
             return
         data = await state.get_data()
         selected = set(data.get("selected_chat_ids", []))
-        category = data.get("category", "")
+        category_id = data.get("category_id", "")
         if callback_data.chat_id in selected:
             selected.remove(callback_data.chat_id)
         else:
             selected.add(callback_data.chat_id)
         await state.update_data(selected_chat_ids=list(selected))
-        _, links = await asyncio.to_thread(deps.admin_repo.get_category_details, category)
+        _, links = await asyncio.to_thread(
+            deps.admin_repo.get_category_details_by_id, category_id
+        )
         groups = [group for _, group in links]
-        text, kb = _build_groups_select_kb(groups, selected, callback_data.page, 6, "remove", category)
+        text, kb = _build_groups_select_kb(
+            groups, selected, callback_data.page, 6, "remove", category_id
+        )
         await respond(callback, text, kb)
 
     @router.callback_query(LinkCb.filter(F.action == "add_page"), LinkSelectState.add_select)
@@ -243,12 +251,16 @@ def build_router(deps: UiDeps) -> Router:
             return
         data = await state.get_data()
         selected = set(data.get("selected_chat_ids", []))
-        category = data.get("category", "")
+        category_id = data.get("category_id", "")
         groups = await asyncio.to_thread(deps.admin_repo.list_groups)
-        _, links = await asyncio.to_thread(deps.admin_repo.get_category_details, category)
+        _, links = await asyncio.to_thread(
+            deps.admin_repo.get_category_details_by_id, category_id
+        )
         bound_ids = {int(group.tg_chat_id) for _, group in links}
         available = [g for g in groups if int(g.tg_chat_id) not in bound_ids]
-        text, kb = _build_groups_select_kb(available, selected, callback_data.page, 6, "add", category)
+        text, kb = _build_groups_select_kb(
+            available, selected, callback_data.page, 6, "add", category_id
+        )
         await respond(callback, text, kb)
 
     @router.callback_query(LinkCb.filter(F.action == "remove_page"), LinkSelectState.remove_select)
@@ -258,10 +270,14 @@ def build_router(deps: UiDeps) -> Router:
             return
         data = await state.get_data()
         selected = set(data.get("selected_chat_ids", []))
-        category = data.get("category", "")
-        _, links = await asyncio.to_thread(deps.admin_repo.get_category_details, category)
+        category_id = data.get("category_id", "")
+        _, links = await asyncio.to_thread(
+            deps.admin_repo.get_category_details_by_id, category_id
+        )
         groups = [group for _, group in links]
-        text, kb = _build_groups_select_kb(groups, selected, callback_data.page, 6, "remove", category)
+        text, kb = _build_groups_select_kb(
+            groups, selected, callback_data.page, 6, "remove", category_id
+        )
         await respond(callback, text, kb)
 
     @router.callback_query(LinkCb.filter(F.action == "add_save"), LinkSelectState.add_select)
@@ -270,14 +286,17 @@ def build_router(deps: UiDeps) -> Router:
             await respond(callback, "Меню доступно только администраторам.")
             return
         data = await state.get_data()
-        category = data.get("category", "")
+        category_id = data.get("category_id", "")
         selected = set(data.get("selected_chat_ids", []))
+        category = await asyncio.to_thread(deps.admin_repo.get_category_by_id, category_id)
         for chat_id in selected:
-            await asyncio.to_thread(deps.admin_repo.bind_category, category, chat_id)
-        deps.logger.info("Bindings added via UI: category=%s count=%s", category, len(selected))
+            await asyncio.to_thread(deps.admin_repo.bind_category, category.name, chat_id)
+        deps.logger.info("Bindings added via UI: category=%s count=%s", category.name, len(selected))
         await state.clear()
-        _, links = await asyncio.to_thread(deps.admin_repo.get_category_details, category)
-        text, kb = _build_category_links_detail(category, links)
+        _, links = await asyncio.to_thread(
+            deps.admin_repo.get_category_details_by_id, category_id
+        )
+        text, kb = _build_category_links_detail(category.name, str(category.id), links)
         await respond(callback, "Источники добавлены.\n\n" + text, kb)
 
     @router.callback_query(LinkCb.filter(F.action == "remove_save"), LinkSelectState.remove_select)
@@ -286,14 +305,17 @@ def build_router(deps: UiDeps) -> Router:
             await respond(callback, "Меню доступно только администраторам.")
             return
         data = await state.get_data()
-        category = data.get("category", "")
+        category_id = data.get("category_id", "")
         selected = set(data.get("selected_chat_ids", []))
+        category = await asyncio.to_thread(deps.admin_repo.get_category_by_id, category_id)
         for chat_id in selected:
-            await asyncio.to_thread(deps.admin_repo.unbind_category, category, chat_id)
-        deps.logger.info("Bindings removed via UI: category=%s count=%s", category, len(selected))
+            await asyncio.to_thread(deps.admin_repo.unbind_category, category.name, chat_id)
+        deps.logger.info("Bindings removed via UI: category=%s count=%s", category.name, len(selected))
         await state.clear()
-        _, links = await asyncio.to_thread(deps.admin_repo.get_category_details, category)
-        text, kb = _build_category_links_detail(category, links)
+        _, links = await asyncio.to_thread(
+            deps.admin_repo.get_category_details_by_id, category_id
+        )
+        text, kb = _build_category_links_detail(category.name, str(category.id), links)
         await respond(callback, "Источники удалены.\n\n" + text, kb)
 
     return router

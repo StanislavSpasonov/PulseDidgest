@@ -118,7 +118,7 @@ def _build_bind_category_kb(categories, chat_id: int) -> types.InlineKeyboardMar
     for category in categories:
         builder.button(
             text=category.name,
-            callback_data=LinkCb(action="bind", category=category.name, chat_id=chat_id).pack(),
+            callback_data=LinkCb(action="bind", category_id=str(category.id), chat_id=chat_id).pack(),
         )
     builder.button(text="Пропустить", callback_data=GroupCb(action="menu").pack())
     builder.button(text="🏠 Домой", callback_data=NavCb(action="home").pack())
@@ -296,19 +296,22 @@ def build_router(deps: UiDeps) -> Router:
             await respond(callback, "Меню доступно только администраторам.")
             return
         try:
+            category = await asyncio.to_thread(
+                deps.admin_repo.get_category_by_id, callback_data.category_id
+            )
             await asyncio.to_thread(
                 deps.admin_repo.bind_category,
-                callback_data.category,
+                category.name,
                 callback_data.chat_id,
             )
             deps.logger.info(
                 "Binding created via UI: category=%s chat_id=%s",
-                callback_data.category,
+                category.name,
                 callback_data.chat_id,
             )
             await respond(
                 callback,
-                f"Привязка создана: {callback_data.category}",
+                f"Привязка создана: {category.name}",
                 _build_groups_menu(),
             )
         except Exception as exc:

@@ -27,7 +27,7 @@ def _build_categories_list(categories, page: int, per_page: int) -> Tuple[str, t
     for category in page_obj.items:
         builder.button(
             text=category.name,
-            callback_data=DeliveryCb(action="category", category=category.name).pack(),
+            callback_data=DeliveryCb(action="category", category_id=str(category.id)).pack(),
         )
     if page_obj.total_pages > 1:
         prev_page, next_page = page_bounds(page_obj.page, page_obj.total_pages)
@@ -70,18 +70,18 @@ def _summarize_links(links) -> Tuple[str, bool, Optional[int], Optional[str], Op
     return mode, enabled, interval, time_local, tz
 
 
-def _build_delivery_kb(category: str, mode: str, enabled: bool) -> types.InlineKeyboardMarkup:
+def _build_delivery_kb(category_id: str, mode: str, enabled: bool) -> types.InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     instant_label = "🚀 Instant: ON" if mode == "instant" and enabled else "🚀 Instant: OFF"
     digest_label = "🧾 Digest: ON" if mode in {"hourly", "interval", "daily"} and enabled else "🧾 Digest: OFF"
-    builder.button(text=instant_label, callback_data=DeliveryCb(action="instant_toggle", category=category).pack())
-    builder.button(text=digest_label, callback_data=DeliveryCb(action="digest_toggle", category=category).pack())
-    builder.button(text="каждый час", callback_data=DeliveryCb(action="preset", category=category, value="hourly").pack())
-    builder.button(text="каждые 3 часа", callback_data=DeliveryCb(action="preset", category=category, value="interval|180").pack())
-    builder.button(text="ежедневно 08:00", callback_data=DeliveryCb(action="preset", category=category, value="daily|08-00").pack())
-    builder.button(text="ежедневно 18:00", callback_data=DeliveryCb(action="preset", category=category, value="daily|18-00").pack())
-    builder.button(text="своё время (HH:MM)", callback_data=DeliveryCb(action="custom", category=category).pack())
-    builder.button(text="📨 Отправить тестовый дайджест сейчас", callback_data=DeliveryCb(action="test_digest", category=category).pack())
+    builder.button(text=instant_label, callback_data=DeliveryCb(action="instant_toggle", category_id=category_id).pack())
+    builder.button(text=digest_label, callback_data=DeliveryCb(action="digest_toggle", category_id=category_id).pack())
+    builder.button(text="каждый час", callback_data=DeliveryCb(action="preset", category_id=category_id, value="hourly").pack())
+    builder.button(text="каждые 3 часа", callback_data=DeliveryCb(action="preset", category_id=category_id, value="interval|180").pack())
+    builder.button(text="ежедневно 08:00", callback_data=DeliveryCb(action="preset", category_id=category_id, value="daily|08-00").pack())
+    builder.button(text="ежедневно 18:00", callback_data=DeliveryCb(action="preset", category_id=category_id, value="daily|18-00").pack())
+    builder.button(text="своё время (HH:MM)", callback_data=DeliveryCb(action="custom", category_id=category_id).pack())
+    builder.button(text="📨 Отправить тестовый дайджест сейчас", callback_data=DeliveryCb(action="test_digest", category_id=category_id).pack())
     builder.button(text="⬅️ Назад", callback_data=DeliveryCb(action="menu").pack())
     builder.button(text="🏠 Домой", callback_data=NavCb(action="home").pack())
     builder.adjust(1)
@@ -137,61 +137,75 @@ def build_router(deps: UiDeps) -> Router:
             await respond(callback, "Меню доступно только администраторам.")
             return
         try:
-            links = await asyncio.to_thread(deps.admin_repo.get_delivery_info, callback_data.category)
+            category = await asyncio.to_thread(
+                deps.admin_repo.get_category_by_id, callback_data.category_id
+            )
+            links = await asyncio.to_thread(
+                deps.admin_repo.get_delivery_info, category.name
+            )
         except Exception as exc:
             await respond(callback, f"Не удалось загрузить доставку: {exc}")
             return
-        text = _format_delivery_text(callback_data.category, links)
+        text = _format_delivery_text(category.name, links)
         mode, enabled, _, _, _ = _summarize_links(links)
-        await respond(callback, text, _build_delivery_kb(callback_data.category, mode, enabled))
+        await respond(callback, text, _build_delivery_kb(callback_data.category_id, mode, enabled))
 
     @router.callback_query(DeliveryCb.filter(F.action == "instant_toggle"))
     async def handle_instant_toggle(callback: types.CallbackQuery, callback_data: DeliveryCb) -> None:
         if not is_admin(callback.from_user.id, deps.admin_user_id):
             await respond(callback, "Меню доступно только администраторам.")
             return
-        links = await asyncio.to_thread(deps.admin_repo.get_delivery_info, callback_data.category)
+        category = await asyncio.to_thread(
+            deps.admin_repo.get_category_by_id, callback_data.category_id
+        )
+        links = await asyncio.to_thread(deps.admin_repo.get_delivery_info, category.name)
         mode, enabled, _, _, _ = _summarize_links(links)
         new_enabled = not (mode == "instant" and enabled)
         await asyncio.to_thread(
             deps.admin_repo.set_delivery_for_category,
-            callback_data.category,
+            category.name,
             "instant",
             None,
             None,
             deps.default_tz,
             new_enabled,
         )
-        deps.logger.info("Delivery instant toggled via UI: category=%s enabled=%s", callback_data.category, new_enabled)
-        await handle_category(callback, DeliveryCb(action="category", category=callback_data.category))
+        deps.logger.info("Delivery instant toggled via UI: category=%s enabled=%s", category.name, new_enabled)
+        await handle_category(callback, DeliveryCb(action="category", category_id=callback_data.category_id))
 
     @router.callback_query(DeliveryCb.filter(F.action == "digest_toggle"))
     async def handle_digest_toggle(callback: types.CallbackQuery, callback_data: DeliveryCb) -> None:
         if not is_admin(callback.from_user.id, deps.admin_user_id):
             await respond(callback, "Меню доступно только администраторам.")
             return
-        links = await asyncio.to_thread(deps.admin_repo.get_delivery_info, callback_data.category)
+        category = await asyncio.to_thread(
+            deps.admin_repo.get_category_by_id, callback_data.category_id
+        )
+        links = await asyncio.to_thread(deps.admin_repo.get_delivery_info, category.name)
         mode, enabled, interval, time_local, _ = _summarize_links(links)
         is_digest = mode in {"hourly", "interval", "daily"}
         new_enabled = not (is_digest and enabled)
         new_mode = mode if is_digest else "hourly"
         await asyncio.to_thread(
             deps.admin_repo.set_delivery_for_category,
-            callback_data.category,
+            category.name,
             new_mode,
             interval if new_mode == "interval" else None,
             time_local if new_mode == "daily" else None,
             deps.default_tz,
             new_enabled,
         )
-        deps.logger.info("Delivery digest toggled via UI: category=%s enabled=%s", callback_data.category, new_enabled)
-        await handle_category(callback, DeliveryCb(action="category", category=callback_data.category))
+        deps.logger.info("Delivery digest toggled via UI: category=%s enabled=%s", category.name, new_enabled)
+        await handle_category(callback, DeliveryCb(action="category", category_id=callback_data.category_id))
 
     @router.callback_query(DeliveryCb.filter(F.action == "preset"))
     async def handle_preset(callback: types.CallbackQuery, callback_data: DeliveryCb) -> None:
         if not is_admin(callback.from_user.id, deps.admin_user_id):
             await respond(callback, "Меню доступно только администраторам.")
             return
+        category = await asyncio.to_thread(
+            deps.admin_repo.get_category_by_id, callback_data.category_id
+        )
         value = callback_data.value
         mode = value
         interval = None
@@ -204,15 +218,15 @@ def build_router(deps: UiDeps) -> Router:
             time_local = value.split("|", 1)[1].replace("-", ":")
         await asyncio.to_thread(
             deps.admin_repo.set_delivery_for_category,
-            callback_data.category,
+            category.name,
             mode,
             interval,
             time_local,
             deps.default_tz,
             True,
         )
-        deps.logger.info("Delivery preset set via UI: category=%s mode=%s", callback_data.category, mode)
-        await handle_category(callback, DeliveryCb(action="category", category=callback_data.category))
+        deps.logger.info("Delivery preset set via UI: category=%s mode=%s", category.name, mode)
+        await handle_category(callback, DeliveryCb(action="category", category_id=callback_data.category_id))
 
     @router.callback_query(DeliveryCb.filter(F.action == "custom"))
     async def handle_custom(callback: types.CallbackQuery, callback_data: DeliveryCb, state: FSMContext) -> None:
@@ -220,9 +234,9 @@ def build_router(deps: UiDeps) -> Router:
             await respond(callback, "Меню доступно только администраторам.")
             return
         await state.set_state(DeliveryTimeState.custom_time)
-        await state.update_data(category=callback_data.category)
+        await state.update_data(category_id=callback_data.category_id)
         builder = InlineKeyboardBuilder()
-        builder.button(text="⬅️ Назад", callback_data=DeliveryCb(action="category", category=callback_data.category).pack())
+        builder.button(text="⬅️ Назад", callback_data=DeliveryCb(action="category", category_id=callback_data.category_id).pack())
         builder.button(text="🏠 Домой", callback_data=NavCb(action="home").pack())
         builder.adjust(2)
         await respond(callback, "Введите время в формате HH:MM:", builder.as_markup())
@@ -234,26 +248,29 @@ def build_router(deps: UiDeps) -> Router:
             await state.clear()
             return
         data = await state.get_data()
-        category = data.get("category", "")
+        category_id = data.get("category_id", "")
         value = (message.text or "").strip()
         if ":" not in value:
             await message.answer("Неверный формат. Пример: 08:00")
             return
+        category = await asyncio.to_thread(
+            deps.admin_repo.get_category_by_id, category_id
+        )
         await asyncio.to_thread(
             deps.admin_repo.set_delivery_for_category,
-            category,
+            category.name,
             "daily",
             None,
             value,
             deps.default_tz,
             True,
         )
-        deps.logger.info("Delivery custom time set via UI: category=%s time=%s", category, value)
+        deps.logger.info("Delivery custom time set via UI: category=%s time=%s", category.name, value)
         await state.clear()
-        links = await asyncio.to_thread(deps.admin_repo.get_delivery_info, category)
-        text = _format_delivery_text(category, links)
+        links = await asyncio.to_thread(deps.admin_repo.get_delivery_info, category.name)
+        text = _format_delivery_text(category.name, links)
         mode, enabled, _, _, _ = _summarize_links(links)
-        await message.answer(text, reply_markup=_build_delivery_kb(category, mode, enabled))
+        await message.answer(text, reply_markup=_build_delivery_kb(category_id, mode, enabled))
 
     @router.callback_query(DeliveryCb.filter(F.action == "test_digest"))
     async def handle_test_digest(callback: types.CallbackQuery, callback_data: DeliveryCb) -> None:
@@ -262,7 +279,7 @@ def build_router(deps: UiDeps) -> Router:
             return
         try:
             category, links = await asyncio.to_thread(
-                deps.admin_repo.get_category_details, callback_data.category
+                deps.admin_repo.get_category_details_by_id, callback_data.category_id
             )
         except Exception as exc:
             await respond(callback, f"Не удалось загрузить категорию: {exc}")
