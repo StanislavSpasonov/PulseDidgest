@@ -4,7 +4,6 @@
 - Digest delivery (hourly / daily)
 - DeliveryPolicy per category
 - Multi-user support
-- Bot UI for managing categories and groups
 
 ## In Progress
 - Уточнить задачу «upgrade»: что конкретно нужно обновить?
@@ -20,6 +19,7 @@
 - Group management via Telethon — админ-бот управляет группами без forward
 - Maintenance: reviewed project docs and set next task for group discovery
 - Maintenance: merged feature/category-show-handler into dev
+- Bot UI v1 (inline keyboard + wizard) — /start и /menu ведут в UI, категории/группы/привязки/доставка/отчёты/настройки
 
 ## Next
-- Group discovery: add group by name via Telethon
+- QA: проверить Bot UI v1 по acceptance criteria и собрать баги/фиксы
