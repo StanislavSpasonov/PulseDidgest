@@ -6,10 +6,10 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
 from aiogram import Bot, Dispatcher, types
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -24,31 +24,23 @@ from src.application.use_cases.manage_groups_telethon import (
     GroupNotFoundError,
     ListUserChatsUseCase,
     MultipleGroupsFoundError,
+    SearchUserChatsUseCase,
 )
 from src.infrastructure.db.engine import get_session_factory
 from src.infrastructure.db.repositories import (
     SQLAlchemyAdminRepository,
+    SQLAlchemyDeliveryRepository,
     SQLAlchemyUserRepository,
 )
 from src.infrastructure.telegram_client.dialog_service import TelethonDialogService
+from apps.bot.routers import ui_categories, ui_delivery, ui_groups, ui_links, ui_menu, ui_reports, ui_settings
+from apps.bot.ui.common import UiDeps, format_chat_line, is_admin
 
 DOTENV_PATH = PROJECT_ROOT / ".env"
 
 
 class PromptStates(StatesGroup):
     waiting_for_prompt = State()
-
-def ensure_admin(message: types.Message, admin_id: int) -> bool:
-    return bool(message.from_user and admin_id and message.from_user.id == admin_id)
-
-
-
-
-
-def format_chat_line(chat) -> str:
-    username = f" (@{chat.username})" if chat.username else ""
-    label = chat.title or (f"@{chat.username}" if chat.username else str(chat.chat_id))
-    return f"{label}{username} — {chat.chat_id} [{chat.chat_type}]"
 
 
 async def main() -> None:
@@ -66,6 +58,11 @@ async def main() -> None:
     telethon_api_id = int(os.getenv("TELEGRAM_API_ID", "0"))
     telethon_api_hash = os.getenv("TELEGRAM_API_HASH")
     session_name = os.getenv("TELETHON_SESSION_NAME", "pulsedidgest")
+    telethon_dialog_limit = int(os.getenv("TELETHON_DIALOGS_LIMIT", "200"))
+    gemini_model = os.getenv("GEMINI_MODEL", "models/gemini-flash-latest")
+    gemini_cooldown = os.getenv("GEMINI_COOLDOWN_SECONDS", "60")
+    config_sync_mode = os.getenv("CONFIG_SYNC_MODE", "seed_if_empty")
+    delivery_tick = os.getenv("DELIVERY_TICK_SECONDS", "60")
     if not telethon_api_id or not telethon_api_hash:
         raise RuntimeError(
             "TELEGRAM_API_ID and TELEGRAM_API_HASH are required for Telethon-based group management"
@@ -76,6 +73,7 @@ async def main() -> None:
     session_factory = get_session_factory()
     user_repo = SQLAlchemyUserRepository(session_factory=session_factory)
     admin_repo = SQLAlchemyAdminRepository(session_factory=session_factory)
+    delivery_repo = SQLAlchemyDeliveryRepository(session_factory=session_factory)
     dialog_service = TelethonDialogService(
         api_id=telethon_api_id,
         api_hash=telethon_api_hash,
@@ -83,29 +81,47 @@ async def main() -> None:
         logger=logging.getLogger("bot.telethon"),
     )
     list_chats_use_case = ListUserChatsUseCase(dialog_service)
+    search_chats_use_case = SearchUserChatsUseCase(dialog_service)
     add_group_use_case = AddGroupByNameUseCase(dialog_service, admin_repo)
+    ui_deps = UiDeps(
+        admin_user_id=admin_user_id,
+        default_tz=default_tz,
+        admin_repo=admin_repo,
+        user_repo=user_repo,
+        delivery_repo=delivery_repo,
+        list_chats_use_case=list_chats_use_case,
+        search_chats_use_case=search_chats_use_case,
+        add_group_use_case=add_group_use_case,
+        telethon_dialog_limit=telethon_dialog_limit,
+        settings_snapshot={
+            "ADMIN_ID": str(admin_user_id),
+            "DEFAULT_TZ": default_tz,
+            "TELETHON_SESSION": session_name,
+            "TELETHON_DIALOGS_LIMIT": str(telethon_dialog_limit),
+            "GEMINI_MODEL": gemini_model,
+            "GEMINI_COOLDOWN_SECONDS": gemini_cooldown,
+            "CONFIG_SYNC_MODE": config_sync_mode,
+            "DELIVERY_TICK_SECONDS": delivery_tick,
+        },
+        logger=logging.getLogger("bot.ui"),
+    )
+    dp.include_router(ui_menu.build_router(ui_deps))
+    dp.include_router(ui_categories.build_router(ui_deps))
+    dp.include_router(ui_groups.build_router(ui_deps))
+    dp.include_router(ui_links.build_router(ui_deps))
+    dp.include_router(ui_delivery.build_router(ui_deps))
+    dp.include_router(ui_reports.build_router(ui_deps))
+    dp.include_router(ui_settings.build_router(ui_deps))
 
     # --------- Basic commands ---------
-    @dp.message(CommandStart())
-    async def handle_start(message: types.Message) -> None:
-        if not message.from_user:
-            await message.answer("Cannot register without user info")
-            return
-        await asyncio.to_thread(
-            user_repo.register_user,
-            message.from_user.id,
-            message.chat.id,
-            message.from_user.username,
-        )
-        await message.answer(f"Registered. chat_id={message.chat.id}")
-
     @dp.message(Command("help"))
     async def handle_help(message: types.Message) -> None:
         help_text = (
             "/start — register user\n"
             "/help — show this message\n"
+            "Открой меню: /menu\n"
         )
-        if ensure_admin(message, admin_user_id):
+        if is_admin(message.from_user.id if message.from_user else None, admin_user_id):
             help_text += (
                 "\nAdmin commands:\n"
                 "/categories, /category_show <name>, /category_create <name>\n"
@@ -124,7 +140,7 @@ async def main() -> None:
     # --------- Categories ---------
     @dp.message(Command("categories"))
     async def handle_categories(message: types.Message) -> None:
-        if not ensure_admin(message, admin_user_id):
+        if not is_admin(message.from_user.id if message.from_user else None, admin_user_id):
             await message.answer("Admin only")
             return
         categories = await asyncio.to_thread(admin_repo.list_categories)
@@ -140,7 +156,7 @@ async def main() -> None:
 
     @dp.message(Command("category_create"))
     async def handle_category_create(message: types.Message) -> None:
-        if not ensure_admin(message, admin_user_id):
+        if not is_admin(message.from_user.id if message.from_user else None, admin_user_id):
             await message.answer("Admin only")
             return
         parts = message.text.split(maxsplit=1)
@@ -156,7 +172,7 @@ async def main() -> None:
 
     @dp.message(Command("category_show"))
     async def handle_category_show(message: types.Message) -> None:
-        if not ensure_admin(message, admin_user_id):
+        if not is_admin(message.from_user.id if message.from_user else None, admin_user_id):
             await message.answer("Admin only")
             return
         parts = message.text.split(maxsplit=1)
@@ -192,12 +208,9 @@ async def main() -> None:
                 )
         await message.answer("\n".join(lines))
 
-    class PromptContext(StatesGroup):
-        waiting = State()
-
     @dp.message(Command("category_prompt"))
     async def handle_category_prompt(message: types.Message, state: FSMContext) -> None:
-        if not ensure_admin(message, admin_user_id):
+        if not is_admin(message.from_user.id if message.from_user else None, admin_user_id):
             await message.answer("Admin only")
             return
         parts = message.text.split(maxsplit=1)
@@ -228,7 +241,7 @@ async def main() -> None:
         await state.clear()
 
     async def _toggle_debug(message: types.Message, enabled: bool) -> None:
-        if not ensure_admin(message, admin_user_id):
+        if not is_admin(message.from_user.id if message.from_user else None, admin_user_id):
             await message.answer("Admin only")
             return
         parts = message.text.split(maxsplit=1)
@@ -257,7 +270,7 @@ async def main() -> None:
     # --------- Groups (Telethon) ---------
     @dp.message(Command("groups"))
     async def handle_groups(message: types.Message) -> None:
-        if not ensure_admin(message, admin_user_id):
+        if not is_admin(message.from_user.id if message.from_user else None, admin_user_id):
             await message.answer("Admin only")
             return
         groups = await asyncio.to_thread(admin_repo.list_groups)
@@ -271,11 +284,11 @@ async def main() -> None:
 
     @dp.message(Command("groups_my"))
     async def handle_groups_my(message: types.Message) -> None:
-        if not ensure_admin(message, admin_user_id):
+        if not is_admin(message.from_user.id if message.from_user else None, admin_user_id):
             await message.answer("Admin only")
             return
         try:
-            chats = await list_chats_use_case.execute()
+            chats = await list_chats_use_case.execute(limit=telethon_dialog_limit)
         except Exception as exc:
             await message.answer(f"Failed to fetch chats: {exc}")
             return
@@ -293,7 +306,7 @@ async def main() -> None:
 
     @dp.message(Command("group_add_chat"))
     async def handle_group_add_chat(message: types.Message) -> None:
-        if not ensure_admin(message, admin_user_id):
+        if not is_admin(message.from_user.id if message.from_user else None, admin_user_id):
             await message.answer("Admin only")
             return
         parts = message.text.split(maxsplit=2)
@@ -311,7 +324,7 @@ async def main() -> None:
 
     @dp.message(Command("group_add_name"))
     async def handle_group_add_name(message: types.Message) -> None:
-        if not ensure_admin(message, admin_user_id):
+        if not is_admin(message.from_user.id if message.from_user else None, admin_user_id):
             await message.answer("Admin only")
             return
         parts = message.text.split(maxsplit=1)
@@ -337,7 +350,7 @@ async def main() -> None:
             ))
 # --------- Binding operations ---------
     async def _bind_unbind(message: types.Message, bind: bool) -> None:
-        if not ensure_admin(message, admin_user_id):
+        if not is_admin(message.from_user.id if message.from_user else None, admin_user_id):
             await message.answer("Admin only")
             return
         parts = message.text.split()
@@ -372,7 +385,7 @@ async def main() -> None:
     # --------- Delivery settings ---------
     @dp.message(Command("delivery_show"))
     async def handle_delivery_show(message: types.Message) -> None:
-        if not ensure_admin(message, admin_user_id):
+        if not is_admin(message.from_user.id if message.from_user else None, admin_user_id):
             await message.answer("Admin only")
             return
         parts = message.text.split(maxsplit=1)
@@ -399,7 +412,7 @@ async def main() -> None:
 
     @dp.message(Command("delivery_set"))
     async def handle_delivery_set(message: types.Message) -> None:
-        if not ensure_admin(message, admin_user_id):
+        if not is_admin(message.from_user.id if message.from_user else None, admin_user_id):
             await message.answer("Admin only")
             return
         parts = message.text.split()
@@ -463,7 +476,7 @@ async def main() -> None:
         await _delivery_toggle(message, False)
 
     async def _delivery_toggle(message: types.Message, enabled: bool) -> None:
-        if not ensure_admin(message, admin_user_id):
+        if not is_admin(message.from_user.id if message.from_user else None, admin_user_id):
             await message.answer("Admin only")
             return
         parts = message.text.split()
@@ -495,7 +508,7 @@ async def main() -> None:
 
     # --------- Reports ---------
     async def _handle_report(message: types.Message, per_group: bool) -> None:
-        if not ensure_admin(message, admin_user_id):
+        if not is_admin(message.from_user.id if message.from_user else None, admin_user_id):
             await message.answer("Admin only")
             return
         parts = message.text.split()
@@ -565,7 +578,7 @@ async def main() -> None:
         await _handle_last_decisions(message, passed=False)
 
     async def _handle_last_decisions(message: types.Message, passed: Optional[bool]) -> None:
-        if not ensure_admin(message, admin_user_id):
+        if not is_admin(message.from_user.id if message.from_user else None, admin_user_id):
             await message.answer("Admin only")
             return
         parts = message.text.split()
@@ -599,7 +612,7 @@ async def main() -> None:
 
     @dp.message(Command("llm_errors"))
     async def handle_llm_errors(message: types.Message) -> None:
-        if not ensure_admin(message, admin_user_id):
+        if not is_admin(message.from_user.id if message.from_user else None, admin_user_id):
             await message.answer("Admin only")
             return
         parts = message.text.split()

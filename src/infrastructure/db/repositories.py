@@ -340,6 +340,38 @@ class SQLAlchemyDeliveryRepository:
         finally:
             session.close()
 
+    def fetch_recent_passed_decisions(
+        self, category_id: str, chat_id: int, since: datetime, limit: int
+    ) -> List[PendingDecisionInfo]:
+        session = self._session_factory()
+        try:
+            stmt = (
+                select(DecisionModel, MessageModel, CategoryModel)
+                .join(MessageModel, DecisionModel.message_id == MessageModel.id)
+                .join(CategoryModel, DecisionModel.category_id == CategoryModel.id)
+                .where(DecisionModel.category_id == uuid.UUID(category_id))
+                .where(DecisionModel.passed.is_(True))
+                .where(MessageModel.source_chat_id == chat_id)
+                .where(DecisionModel.created_at >= since)
+                .order_by(DecisionModel.created_at.desc())
+                .limit(limit)
+            )
+            results: List[PendingDecisionInfo] = []
+            for decision, message, category in session.execute(stmt).all():
+                results.append(
+                    PendingDecisionInfo(
+                        decision_id=str(decision.id),
+                        category_id=str(category.id),
+                        category_name=category.name,
+                        message_text=message.text or "",
+                        score=decision.score,
+                        reason=decision.reason,
+                        created_at=decision.created_at,
+                    )
+                )
+            return results
+        finally:
+            session.close()
     def mark_decisions_delivered(self, decision_ids: List[str]) -> None:
         if not decision_ids:
             return
@@ -441,6 +473,35 @@ class SQLAlchemyAdminRepository:
         finally:
             session.close()
 
+    def rename_category(self, current_name: str, new_name: str) -> None:
+        session = self._session_factory()
+        try:
+            category = self._get_category(session, current_name)
+            existing = session.execute(
+                select(CategoryModel).where(CategoryModel.name == new_name)
+            ).scalar_one_or_none()
+            if existing and existing.id != category.id:
+                raise ValueError("Category already exists")
+            category.name = new_name
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def delete_category(self, name: str) -> None:
+        session = self._session_factory()
+        try:
+            category = self._get_category(session, name)
+            session.delete(category)
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
     def set_category_prompt(self, name: str, prompt: str) -> None:
         session = self._session_factory()
         try:
@@ -499,6 +560,22 @@ class SQLAlchemyAdminRepository:
             else:
                 if title:
                     group.title = title
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def delete_group(self, chat_id: int) -> None:
+        session = self._session_factory()
+        try:
+            group = session.execute(
+                select(SourceGroupModel).where(SourceGroupModel.tg_chat_id == chat_id)
+            ).scalar_one_or_none()
+            if group is None:
+                raise ValueError("Group not found")
+            session.delete(group)
             session.commit()
         except Exception:
             session.rollback()
@@ -583,6 +660,37 @@ class SQLAlchemyAdminRepository:
             link = self._get_link(session, category.id, group.id)
             link.is_enabled = enabled
             session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def set_delivery_for_category(
+        self,
+        category_name: str,
+        mode: str,
+        interval_minutes: Optional[int],
+        time_local: Optional[str],
+        timezone: str,
+        enabled: Optional[bool] = None,
+    ) -> int:
+        session = self._session_factory()
+        try:
+            category = self._get_category(session, category_name)
+            stmt = select(CategoryGroupModel).where(
+                CategoryGroupModel.category_id == category.id
+            )
+            links = session.execute(stmt).scalars().all()
+            for link in links:
+                link.delivery_mode = mode
+                link.delivery_interval_minutes = interval_minutes
+                link.delivery_time_local = time_local
+                link.delivery_tz = timezone
+                if enabled is not None:
+                    link.is_enabled = enabled
+            session.commit()
+            return len(links)
         except Exception:
             session.rollback()
             raise
