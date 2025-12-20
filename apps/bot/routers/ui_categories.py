@@ -251,10 +251,11 @@ def build_router(deps: UiDeps) -> Router:
     router = Router()
 
     @router.callback_query(CategoryCb.filter(F.action == "menu"))
-    async def handle_menu(callback: types.CallbackQuery) -> None:
+    async def handle_menu(callback: types.CallbackQuery, state: FSMContext) -> None:
         if not is_admin(callback.from_user.id, deps.admin_user_id):
             await respond(callback, "Меню доступно только администраторам.")
             return
+        await state.clear()
         await respond(callback, "Категории", _build_categories_menu())
 
     @router.callback_query(CategoryCb.filter(F.action == "list"))

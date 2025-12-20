@@ -26,6 +26,7 @@
 - Test coverage: added unit tests for delivery/prefilter/telethon/group management
 - Fix: bot startup sys.path initialization before src imports
 - UI: one-column list keyboards + truncation helper
+- Fix: link selection callbacks shortened + navigation state cleared
 
 ## Next
 - QA: проверить Bot UI v1 по acceptance criteria и собрать баги/фиксы

@@ -8,7 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from apps.bot.ui.callbacks import LinkCb, NavCb
+from apps.bot.ui.callbacks import LinkCb, LinkSelectCb, NavCb
 from apps.bot.ui.common import UiDeps, is_admin, respond
 from apps.bot.ui.list_keyboard import build_one_column_list
 
@@ -73,26 +73,21 @@ def _build_groups_select_kb(
             "✅" if int(group.tg_chat_id) in selected else "➕",
             group.title or str(group.tg_chat_id),
         ),
-        callback_fn=lambda group: LinkCb(
+        callback_fn=lambda group: LinkSelectCb(
             action=f"{mode}_toggle",
-            category_id=category_id,
             chat_id=int(group.tg_chat_id),
             page=page,
         ).pack(),
         page=page,
         page_size=per_page,
-        page_callback_fn=lambda p: LinkCb(
-            action=f"{mode}_page", category_id=category_id, page=p
-        ).pack(),
+        page_callback_fn=lambda p: LinkSelectCb(action=f"{mode}_page", page=p).pack(),
         back_cb=LinkCb(action="category", category_id=category_id).pack(),
         home_cb=NavCb(action="home").pack(),
         extra_rows=[
             [
                 types.InlineKeyboardButton(
                     text="Сохранить",
-                    callback_data=LinkCb(
-                        action=f"{mode}_save", category_id=category_id
-                    ).pack(),
+                    callback_data=LinkSelectCb(action=f"{mode}_save").pack(),
                 )
             ]
         ],
@@ -104,19 +99,25 @@ def build_router(deps: UiDeps) -> Router:
     router = Router()
 
     @router.callback_query(LinkCb.filter(F.action == "menu"))
-    async def handle_menu(callback: types.CallbackQuery, callback_data: LinkCb) -> None:
+    async def handle_menu(
+        callback: types.CallbackQuery, callback_data: LinkCb, state: FSMContext
+    ) -> None:
         if not is_admin(callback.from_user.id, deps.admin_user_id):
             await respond(callback, "Меню доступно только администраторам.")
             return
+        await state.clear()
         categories = await asyncio.to_thread(deps.admin_repo.list_categories)
         text, kb = _build_categories_list(categories, callback_data.page, 6)
         await respond(callback, text, kb)
 
     @router.callback_query(LinkCb.filter(F.action == "category"))
-    async def handle_category(callback: types.CallbackQuery, callback_data: LinkCb) -> None:
+    async def handle_category(
+        callback: types.CallbackQuery, callback_data: LinkCb, state: FSMContext
+    ) -> None:
         if not is_admin(callback.from_user.id, deps.admin_user_id):
             await respond(callback, "Меню доступно только администраторам.")
             return
+        await state.clear()
         try:
             category, links = await asyncio.to_thread(
                 deps.admin_repo.get_category_details_by_id, callback_data.category_id
@@ -161,8 +162,8 @@ def build_router(deps: UiDeps) -> Router:
         )
         await respond(callback, text, kb)
 
-    @router.callback_query(LinkCb.filter(F.action == "add_toggle"), LinkSelectState.add_select)
-    async def handle_add_toggle(callback: types.CallbackQuery, callback_data: LinkCb, state: FSMContext) -> None:
+    @router.callback_query(LinkSelectCb.filter(F.action == "add_toggle"), LinkSelectState.add_select)
+    async def handle_add_toggle(callback: types.CallbackQuery, callback_data: LinkSelectCb, state: FSMContext) -> None:
         if not is_admin(callback.from_user.id, deps.admin_user_id):
             await respond(callback, "Меню доступно только администраторам.")
             return
@@ -185,8 +186,8 @@ def build_router(deps: UiDeps) -> Router:
         )
         await respond(callback, text, kb)
 
-    @router.callback_query(LinkCb.filter(F.action == "remove_toggle"), LinkSelectState.remove_select)
-    async def handle_remove_toggle(callback: types.CallbackQuery, callback_data: LinkCb, state: FSMContext) -> None:
+    @router.callback_query(LinkSelectCb.filter(F.action == "remove_toggle"), LinkSelectState.remove_select)
+    async def handle_remove_toggle(callback: types.CallbackQuery, callback_data: LinkSelectCb, state: FSMContext) -> None:
         if not is_admin(callback.from_user.id, deps.admin_user_id):
             await respond(callback, "Меню доступно только администраторам.")
             return
@@ -207,8 +208,8 @@ def build_router(deps: UiDeps) -> Router:
         )
         await respond(callback, text, kb)
 
-    @router.callback_query(LinkCb.filter(F.action == "add_page"), LinkSelectState.add_select)
-    async def handle_add_page(callback: types.CallbackQuery, callback_data: LinkCb, state: FSMContext) -> None:
+    @router.callback_query(LinkSelectCb.filter(F.action == "add_page"), LinkSelectState.add_select)
+    async def handle_add_page(callback: types.CallbackQuery, callback_data: LinkSelectCb, state: FSMContext) -> None:
         if not is_admin(callback.from_user.id, deps.admin_user_id):
             await respond(callback, "Меню доступно только администраторам.")
             return
@@ -226,8 +227,8 @@ def build_router(deps: UiDeps) -> Router:
         )
         await respond(callback, text, kb)
 
-    @router.callback_query(LinkCb.filter(F.action == "remove_page"), LinkSelectState.remove_select)
-    async def handle_remove_page(callback: types.CallbackQuery, callback_data: LinkCb, state: FSMContext) -> None:
+    @router.callback_query(LinkSelectCb.filter(F.action == "remove_page"), LinkSelectState.remove_select)
+    async def handle_remove_page(callback: types.CallbackQuery, callback_data: LinkSelectCb, state: FSMContext) -> None:
         if not is_admin(callback.from_user.id, deps.admin_user_id):
             await respond(callback, "Меню доступно только администраторам.")
             return
@@ -243,7 +244,7 @@ def build_router(deps: UiDeps) -> Router:
         )
         await respond(callback, text, kb)
 
-    @router.callback_query(LinkCb.filter(F.action == "add_save"), LinkSelectState.add_select)
+    @router.callback_query(LinkSelectCb.filter(F.action == "add_save"), LinkSelectState.add_select)
     async def handle_add_save(callback: types.CallbackQuery, state: FSMContext) -> None:
         if not is_admin(callback.from_user.id, deps.admin_user_id):
             await respond(callback, "Меню доступно только администраторам.")
@@ -262,7 +263,7 @@ def build_router(deps: UiDeps) -> Router:
         text, kb = _build_category_links_detail(category.name, str(category.id), links)
         await respond(callback, "Источники добавлены.\n\n" + text, kb)
 
-    @router.callback_query(LinkCb.filter(F.action == "remove_save"), LinkSelectState.remove_select)
+    @router.callback_query(LinkSelectCb.filter(F.action == "remove_save"), LinkSelectState.remove_select)
     async def handle_remove_save(callback: types.CallbackQuery, state: FSMContext) -> None:
         if not is_admin(callback.from_user.id, deps.admin_user_id):
             await respond(callback, "Меню доступно только администраторам.")

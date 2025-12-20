@@ -43,6 +43,12 @@ class LinkCb(CallbackData, prefix="link"):
     page: int = 0
 
 
+class LinkSelectCb(CallbackData, prefix="lnk"):
+    action: str
+    chat_id: int = 0
+    page: int = 0
+
+
 class DeliveryCb(CallbackData, prefix="del"):
     action: str
     category_id: str = ""
