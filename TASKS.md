@@ -30,6 +30,7 @@
 - Tests: navigation layout (list keyboard back/home ordering)
 - Logging: collector pipeline diagnostics (bindings/persist/decisions)
 - Launcher: single entrypoint runs bot + collector
+- Launcher: skip collector when TELEGRAM_SOURCE_CHAT is missing
 
 ## Next
 - QA: проверить unified launcher + Bot UI по acceptance criteria

@@ -33,7 +33,13 @@ def main() -> None:
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    children.append(_spawn(collector_cmd))
+    if os.getenv("TELEGRAM_SOURCE_CHAT"):
+        children.append(_spawn(collector_cmd))
+    else:
+        print(
+            "TELEGRAM_SOURCE_CHAT is not set; collector will not start.",
+            file=sys.stderr,
+        )
     children.append(_spawn(bot_cmd))
 
     exit_code = 0
