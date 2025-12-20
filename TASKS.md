@@ -24,6 +24,8 @@
 - Fix: category callbacks use IDs to avoid 64-byte limit
 - Quality sweep: cleanup, config refactor, tests, docs
 - Test coverage: added unit tests for delivery/prefilter/telethon/group management
+- Fix: bot startup sys.path initialization before src imports
+- UI: one-column list keyboards + truncation helper
 
 ## Next
 - QA: проверить Bot UI v1 по acceptance criteria и собрать баги/фиксы

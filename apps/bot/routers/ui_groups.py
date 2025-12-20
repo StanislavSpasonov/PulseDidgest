@@ -9,8 +9,8 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from apps.bot.ui.callbacks import GroupCb, LinkCb, NavCb
-from apps.bot.ui.common import UiDeps, format_chat_line, is_admin, respond, truncate
-from apps.bot.ui.pagination import paginate, page_bounds
+from apps.bot.ui.common import UiDeps, format_chat_line, is_admin, respond
+from apps.bot.ui.list_keyboard import build_one_column_list
 
 
 class GroupSearchState(StatesGroup):
@@ -35,95 +35,78 @@ def _format_dialogs_list(
     title: str,
     list_action: str,
 ) -> Tuple[str, types.InlineKeyboardMarkup]:
-    page_obj = paginate(chats, page, per_page)
-    builder = InlineKeyboardBuilder()
     lines = [title]
-    if not page_obj.items:
+    if not chats:
         lines.append("Ничего не найдено.")
-    for chat in page_obj.items:
-        label = truncate(chat.title or chat.username or str(chat.chat_id), 28)
-        if chat.chat_id in registered_ids:
-            button_text = f"✅ {label}"
-            callback = GroupCb(action="detail", chat_id=int(chat.chat_id)).pack()
-        else:
-            button_text = f"➕ {label}"
-            callback = GroupCb(action="add", chat_id=int(chat.chat_id)).pack()
-        builder.button(text=button_text, callback_data=callback)
-    if page_obj.total_pages > 1:
-        prev_page, next_page = page_bounds(page_obj.page, page_obj.total_pages)
-        row = []
-        if page_obj.has_prev:
-            row.append(
-                types.InlineKeyboardButton(
-                    text="⬅️ Prev",
-                    callback_data=GroupCb(action=list_action, page=prev_page).pack(),
-                )
-            )
-        if page_obj.has_next:
-            row.append(
-                types.InlineKeyboardButton(
-                    text="Next ➡️",
-                    callback_data=GroupCb(action=list_action, page=next_page).pack(),
-                )
-            )
-        if row:
-            builder.row(*row)
-    builder.row(
-        types.InlineKeyboardButton(text="⬅️ Назад", callback_data=GroupCb(action="menu").pack()),
-        types.InlineKeyboardButton(text="🏠 Домой", callback_data=NavCb(action="home").pack()),
+    page_obj, kb = build_one_column_list(
+        chats,
+        label_fn=lambda chat: "{} {}".format(
+            "✅" if chat.chat_id in registered_ids else "➕",
+            _format_chat_label(chat),
+        ),
+        callback_fn=lambda chat: (
+            GroupCb(action="detail", chat_id=int(chat.chat_id)).pack()
+            if chat.chat_id in registered_ids
+            else GroupCb(action="add", chat_id=int(chat.chat_id)).pack()
+        ),
+        page=page,
+        page_size=per_page,
+        page_callback_fn=lambda p: GroupCb(action=list_action, page=p).pack(),
+        back_cb=GroupCb(action="menu").pack(),
+        home_cb=NavCb(action="home").pack(),
     )
-    return "\n".join(lines), builder.as_markup()
+    return "\n".join(lines), kb
 
 
 def _format_registered_list(groups, page: int, per_page: int) -> Tuple[str, types.InlineKeyboardMarkup]:
-    page_obj = paginate(groups, page, per_page)
-    builder = InlineKeyboardBuilder()
     lines = ["Зарегистрированные группы:"]
-    if not page_obj.items:
+    if not groups:
         lines.append("Пока нет зарегистрированных групп.")
-    for group in page_obj.items:
-        label = truncate(group.title or str(group.tg_chat_id), 28)
-        builder.button(
-            text=label,
-            callback_data=GroupCb(action="detail", chat_id=int(group.tg_chat_id)).pack(),
-        )
-    if page_obj.total_pages > 1:
-        prev_page, next_page = page_bounds(page_obj.page, page_obj.total_pages)
-        row = []
-        if page_obj.has_prev:
-            row.append(
-                types.InlineKeyboardButton(
-                    text="⬅️ Prev",
-                    callback_data=GroupCb(action="registered", page=prev_page).pack(),
-                )
-            )
-        if page_obj.has_next:
-            row.append(
-                types.InlineKeyboardButton(
-                    text="Next ➡️",
-                    callback_data=GroupCb(action="registered", page=next_page).pack(),
-                )
-            )
-        if row:
-            builder.row(*row)
-    builder.row(
-        types.InlineKeyboardButton(text="⬅️ Назад", callback_data=GroupCb(action="menu").pack()),
-        types.InlineKeyboardButton(text="🏠 Домой", callback_data=NavCb(action="home").pack()),
+    page_obj, kb = build_one_column_list(
+        groups,
+        label_fn=lambda group: group.title or str(group.tg_chat_id),
+        callback_fn=lambda group: GroupCb(
+            action="detail", chat_id=int(group.tg_chat_id)
+        ).pack(),
+        page=page,
+        page_size=per_page,
+        page_callback_fn=lambda p: GroupCb(action="registered", page=p).pack(),
+        back_cb=GroupCb(action="menu").pack(),
+        home_cb=NavCb(action="home").pack(),
     )
-    return "\n".join(lines), builder.as_markup()
+    return "\n".join(lines), kb
 
 
 def _build_bind_category_kb(categories, chat_id: int) -> types.InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    for category in categories:
-        builder.button(
-            text=category.name,
-            callback_data=LinkCb(action="bind", category_id=str(category.id), chat_id=chat_id).pack(),
-        )
-    builder.button(text="Пропустить", callback_data=GroupCb(action="menu").pack())
-    builder.button(text="🏠 Домой", callback_data=NavCb(action="home").pack())
-    builder.adjust(1)
-    return builder.as_markup()
+    _, kb = build_one_column_list(
+        categories,
+        label_fn=lambda category: category.name,
+        callback_fn=lambda category: LinkCb(
+            action="bind", category_id=str(category.id), chat_id=chat_id
+        ).pack(),
+        page=0,
+        page_size=len(categories) or 1,
+        show_prev_next=False,
+        show_back_home=True,
+        back_cb=None,
+        home_cb=NavCb(action="home").pack(),
+        extra_rows=[
+            [
+                types.InlineKeyboardButton(
+                    text="Пропустить",
+                    callback_data=GroupCb(action="menu").pack(),
+                )
+            ]
+        ],
+    )
+    return kb
+
+
+def _format_chat_label(chat) -> str:
+    title = chat.title or f"@{chat.username}" if chat.username else str(chat.chat_id)
+    if chat.username and chat.title:
+        return f"{title} (@{chat.username})"
+    return title
 
 
 def _build_group_detail_kb(chat_id: int) -> types.InlineKeyboardMarkup:

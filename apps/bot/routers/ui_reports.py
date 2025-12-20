@@ -9,7 +9,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from apps.bot.ui.callbacks import NavCb, ReportCb
 from apps.bot.ui.common import UiDeps, is_admin, respond, truncate
-from apps.bot.ui.pagination import paginate, page_bounds
+from apps.bot.ui.list_keyboard import build_one_column_list
 
 
 def _build_reports_menu() -> types.InlineKeyboardMarkup:
@@ -25,40 +25,24 @@ def _build_reports_menu() -> types.InlineKeyboardMarkup:
 
 
 def _build_categories_list(categories, action: str, page: int) -> Tuple[str, types.InlineKeyboardMarkup]:
-    page_obj = paginate(categories, page, 6)
-    builder = InlineKeyboardBuilder()
     lines = ["Выберите категорию:"]
-    if not page_obj.items:
+    if not categories:
         lines.append("Категорий пока нет.")
-    for category in page_obj.items:
-        builder.button(
-            text=category.name,
-            callback_data=ReportCb(action=action, category_id=str(category.id)).pack(),
-        )
-    if page_obj.total_pages > 1:
-        prev_page, next_page = page_bounds(page_obj.page, page_obj.total_pages)
-        row = []
-        if page_obj.has_prev:
-            row.append(
-                types.InlineKeyboardButton(
-                    text="⬅️ Prev",
-                    callback_data=ReportCb(action=f"{action}_page", value=str(prev_page)).pack(),
-                )
-            )
-        if page_obj.has_next:
-            row.append(
-                types.InlineKeyboardButton(
-                    text="Next ➡️",
-                    callback_data=ReportCb(action=f"{action}_page", value=str(next_page)).pack(),
-                )
-            )
-        if row:
-            builder.row(*row)
-    builder.row(
-        types.InlineKeyboardButton(text="⬅️ Назад", callback_data=ReportCb(action="menu").pack()),
-        types.InlineKeyboardButton(text="🏠 Домой", callback_data=NavCb(action="home").pack()),
+    page_obj, kb = build_one_column_list(
+        categories,
+        label_fn=lambda category: category.name,
+        callback_fn=lambda category: ReportCb(
+            action=action, category_id=str(category.id)
+        ).pack(),
+        page=page,
+        page_size=6,
+        page_callback_fn=lambda p: ReportCb(
+            action=f"{action}_page", value=str(p)
+        ).pack(),
+        back_cb=ReportCb(action="menu").pack(),
+        home_cb=NavCb(action="home").pack(),
     )
-    return "\n".join(lines), builder.as_markup()
+    return "\n".join(lines), kb
 
 
 def _build_limit_kb(action: str, category_id: str) -> types.InlineKeyboardMarkup:

@@ -11,7 +11,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from apps.bot.ui.callbacks import DeliveryCb, NavCb
 from apps.bot.ui.common import UiDeps, is_admin, respond
-from apps.bot.ui.pagination import paginate, page_bounds
+from apps.bot.ui.list_keyboard import build_one_column_list
 
 
 class DeliveryTimeState(StatesGroup):
@@ -19,39 +19,22 @@ class DeliveryTimeState(StatesGroup):
 
 
 def _build_categories_list(categories, page: int, per_page: int) -> Tuple[str, types.InlineKeyboardMarkup]:
-    page_obj = paginate(categories, page, per_page)
-    builder = InlineKeyboardBuilder()
     lines = ["Выберите категорию для доставки:"]
-    if not page_obj.items:
+    if not categories:
         lines.append("Категорий пока нет.")
-    for category in page_obj.items:
-        builder.button(
-            text=category.name,
-            callback_data=DeliveryCb(action="category", category_id=str(category.id)).pack(),
-        )
-    if page_obj.total_pages > 1:
-        prev_page, next_page = page_bounds(page_obj.page, page_obj.total_pages)
-        row = []
-        if page_obj.has_prev:
-            row.append(
-                types.InlineKeyboardButton(
-                    text="⬅️ Prev",
-                    callback_data=DeliveryCb(action="menu", value=str(prev_page)).pack(),
-                )
-            )
-        if page_obj.has_next:
-            row.append(
-                types.InlineKeyboardButton(
-                    text="Next ➡️",
-                    callback_data=DeliveryCb(action="menu", value=str(next_page)).pack(),
-                )
-            )
-        if row:
-            builder.row(*row)
-    builder.row(
-        types.InlineKeyboardButton(text="🏠 Домой", callback_data=NavCb(action="home").pack())
+    page_obj, kb = build_one_column_list(
+        categories,
+        label_fn=lambda category: category.name,
+        callback_fn=lambda category: DeliveryCb(
+            action="category", category_id=str(category.id)
+        ).pack(),
+        page=page,
+        page_size=per_page,
+        page_callback_fn=lambda p: DeliveryCb(action="menu", value=str(p)).pack(),
+        back_cb=None,
+        home_cb=NavCb(action="home").pack(),
     )
-    return "\n".join(lines), builder.as_markup()
+    return "\n".join(lines), kb
 
 
 def _summarize_links(links) -> Tuple[str, bool, Optional[int], Optional[str], Optional[str]]:

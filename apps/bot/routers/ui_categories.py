@@ -10,7 +10,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from apps.bot.ui.callbacks import CategoryCb, CategoryDeliveryCb, CategorySourceCb, LinkCb, NavCb, DeliveryCb
 from apps.bot.ui.common import UiDeps, is_admin, respond, truncate
-from apps.bot.ui.pagination import paginate, page_bounds
+from apps.bot.ui.list_keyboard import build_one_column_list
 
 
 class CategoryCreateState(StatesGroup):
@@ -53,47 +53,24 @@ def _build_categories_menu() -> types.InlineKeyboardMarkup:
 def _format_categories_list(
     categories, page: int, per_page: int, title: str
 ) -> Tuple[str, types.InlineKeyboardMarkup]:
-    page_obj = paginate(categories, page, per_page)
     lines = [title]
-    builder = InlineKeyboardBuilder()
-    for category in page_obj.items:
-        label = f"{category.name} ({'debug on' if category.debug_enabled else 'debug off'})"
-        builder.button(
-            text=label,
-            callback_data=CategoryCb(action="detail", category_id=str(category.id)).pack(),
-        )
+    page_obj, kb = build_one_column_list(
+        categories,
+        label_fn=lambda category: (
+            f"{category.name} ({'🧪 on' if category.debug_enabled else '🧪 off'})"
+        ),
+        callback_fn=lambda category: CategoryCb(
+            action="detail", category_id=str(category.id)
+        ).pack(),
+        page=page,
+        page_size=per_page,
+        page_callback_fn=lambda p: CategoryCb(action="list", page=p).pack(),
+        back_cb=CategoryCb(action="menu").pack(),
+        home_cb=NavCb(action="home").pack(),
+    )
     if page_obj.total == 0:
         lines.append("Пока нет категорий.")
-    if page_obj.total_pages > 1:
-        prev_page, next_page = page_bounds(page_obj.page, page_obj.total_pages)
-        row = []
-        if page_obj.has_prev:
-            row.append(
-                types.InlineKeyboardButton(
-                    text="⬅️ Prev",
-                    callback_data=CategoryCb(action="list", page=prev_page).pack(),
-                )
-            )
-        if page_obj.has_next:
-            row.append(
-                types.InlineKeyboardButton(
-                    text="Next ➡️",
-                    callback_data=CategoryCb(action="list", page=next_page).pack(),
-                )
-            )
-        if row:
-            builder.row(*row)
-    builder.row(
-        types.InlineKeyboardButton(
-            text="⬅️ Назад",
-            callback_data=CategoryCb(action="menu").pack(),
-        ),
-        types.InlineKeyboardButton(
-            text="🏠 Домой",
-            callback_data=NavCb(action="home").pack(),
-        ),
-    )
-    return "\n".join(lines), builder.as_markup()
+    return "\n".join(lines), kb
 
 
 def _format_category_detail(category, links) -> Tuple[str, types.InlineKeyboardMarkup]:
@@ -149,53 +126,33 @@ def _format_category_detail(category, links) -> Tuple[str, types.InlineKeyboardM
 def _build_sources_select_kb(
     groups, selected: Set[int], page: int, per_page: int
 ) -> Tuple[str, types.InlineKeyboardMarkup]:
-    page_obj = paginate(groups, page, per_page)
-    builder = InlineKeyboardBuilder()
     lines = ["Выберите источники (можно несколько):"]
-    if not page_obj.items:
+    if not groups:
         lines.append("Нет зарегистрированных групп.")
-    for group in page_obj.items:
-        label = group.title or str(group.tg_chat_id)
-        mark = "✅" if group.tg_chat_id in selected else "➕"
-        builder.button(
-            text=f"{mark} {label}",
-            callback_data=CategorySourceCb(
-                action="toggle", chat_id=int(group.tg_chat_id), page=page_obj.page
-            ).pack(),
-        )
-    if page_obj.total_pages > 1:
-        prev_page, next_page = page_bounds(page_obj.page, page_obj.total_pages)
-        row = []
-        if page_obj.has_prev:
-            row.append(
-                types.InlineKeyboardButton(
-                    text="⬅️ Prev",
-                    callback_data=CategorySourceCb(action="page", page=prev_page).pack(),
-                )
-            )
-        if page_obj.has_next:
-            row.append(
-                types.InlineKeyboardButton(
-                    text="Next ➡️",
-                    callback_data=CategorySourceCb(action="page", page=next_page).pack(),
-                )
-            )
-        if row:
-            builder.row(*row)
-    builder.row(
-        types.InlineKeyboardButton(
-            text="Дальше ➡️", callback_data=CategorySourceCb(action="done").pack()
-        )
-    )
-    builder.row(
-        types.InlineKeyboardButton(
-            text="⬅️ Назад", callback_data=CategoryCb(action="menu").pack()
+    page_obj, kb = build_one_column_list(
+        groups,
+        label_fn=lambda group: "{} {}".format(
+            "✅" if group.tg_chat_id in selected else "➕",
+            group.title or str(group.tg_chat_id),
         ),
-        types.InlineKeyboardButton(
-            text="🏠 Домой", callback_data=NavCb(action="home").pack()
-        ),
+        callback_fn=lambda group: CategorySourceCb(
+            action="toggle", chat_id=int(group.tg_chat_id), page=page
+        ).pack(),
+        page=page,
+        page_size=per_page,
+        page_callback_fn=lambda p: CategorySourceCb(action="page", page=p).pack(),
+        back_cb=CategoryCb(action="menu").pack(),
+        home_cb=NavCb(action="home").pack(),
+        extra_rows=[
+            [
+                types.InlineKeyboardButton(
+                    text="Дальше ➡️",
+                    callback_data=CategorySourceCb(action="done").pack(),
+                )
+            ]
+        ],
     )
-    return "\n".join(lines), builder.as_markup()
+    return "\n".join(lines), kb
 
 
 def _build_sources_decision_kb() -> types.InlineKeyboardMarkup:
