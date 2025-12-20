@@ -33,3 +33,24 @@ def test_build_one_column_list_layout() -> None:
     assert all(len(row) == 1 for row in rows[:2])
     assert [button.text for button in rows[2]] == ["Next ➡️"]
     assert [button.text for button in rows[3]] == ["⬅️ Назад", "🏠 Домой"]
+
+
+def test_build_one_column_list_with_extra_rows_keeps_nav_last() -> None:
+    items = [1]
+    page_obj, kb = build_one_column_list(
+        items,
+        label_fn=lambda value: f"Item {value}",
+        callback_fn=lambda value: f"cb:{value}",
+        page=0,
+        page_size=1,
+        page_callback_fn=None,
+        back_cb="back",
+        home_cb="home",
+        extra_rows=[[types.InlineKeyboardButton(text="Extra", callback_data="x")]],
+    )
+
+    assert page_obj.total == 1
+    rows = kb.inline_keyboard
+    assert [button.text for button in rows[0]] == ["Item 1"]
+    assert [button.text for button in rows[1]] == ["Extra"]
+    assert [button.text for button in rows[2]] == ["⬅️ Назад", "🏠 Домой"]
