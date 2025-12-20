@@ -26,7 +26,7 @@ class TelethonDialogService:
         self._session_name = session_name
         self._logger = logger or logging.getLogger("telethon.dialogs")
 
-    async def list_user_chats(self) -> List[TelegramChatInfo]:
+    async def list_user_chats(self, limit: Optional[int] = None) -> List[TelegramChatInfo]:
         client = TelegramClient(self._session_name, self._api_id, self._api_hash)
         await client.connect()
         try:
@@ -34,7 +34,7 @@ class TelethonDialogService:
                 raise RuntimeError(
                     "Telethon session is not authorized. Run the collector once to authenticate."
                 )
-            dialogs = await client.get_dialogs(limit=None)
+            dialogs = await client.get_dialogs(limit=limit)
             chats: List[TelegramChatInfo] = []
             for dialog in dialogs:
                 entity = dialog.entity

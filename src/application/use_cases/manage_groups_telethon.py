@@ -32,10 +32,30 @@ class ListUserChatsUseCase:
         self._dialog_service = dialog_service
         self._logger = logger or logging.getLogger("bot.list_chats")
 
-    async def execute(self) -> List[TelegramChatInfo]:
-        chats = await self._dialog_service.list_user_chats()
+    async def execute(self, limit: Optional[int] = None) -> List[TelegramChatInfo]:
+        chats = await self._dialog_service.list_user_chats(limit=limit)
         self._logger.debug("list_user_chats fetched=%s", len(chats))
         return chats
+
+
+class SearchUserChatsUseCase:
+    def __init__(self, dialog_service, logger: Optional[logging.Logger] = None) -> None:
+        self._dialog_service = dialog_service
+        self._logger = logger or logging.getLogger("bot.search_chats")
+
+    async def execute(self, query: str, limit: Optional[int] = None) -> List[TelegramChatInfo]:
+        normalized = query.strip().lower()
+        if not normalized:
+            return []
+        chats = await self._dialog_service.list_user_chats(limit=limit)
+        matches = [
+            chat
+            for chat in chats
+            if (chat.title and normalized in chat.title.lower())
+            or (chat.username and normalized in chat.username.lower())
+        ]
+        self._logger.debug("search_user_chats matches=%s query=%s", len(matches), query)
+        return matches
 
 
 class AddGroupByNameUseCase:
