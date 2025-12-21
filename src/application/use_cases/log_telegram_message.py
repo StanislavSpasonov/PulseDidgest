@@ -26,17 +26,24 @@ class LogTelegramMessageUseCase:
         self._logger = logger or logging.getLogger("collector.use_case")
 
     async def handle(self, event: NewMessage.Event) -> None:  # type: ignore[name-defined]
-        message = getattr(event, "message", None)
-        if message is None:
-            self._logger.warning("Received event without message payload: %s", event)
-            return
-
-        payload = LoggedTelegramMessage(
-            chat_id=getattr(event, "chat_id", None),
-            message_id=getattr(message, "id", None),
-            date_iso=self._format_date(getattr(message, "date", None)),
-            text=getattr(message, "message", "") or "",
-        )
+        if hasattr(event, "chat_id") and hasattr(event, "message_id"):
+            payload = LoggedTelegramMessage(
+                chat_id=getattr(event, "chat_id", None),
+                message_id=getattr(event, "message_id", None),
+                date_iso=self._format_date(getattr(event, "date", None)),
+                text=getattr(event, "text", "") or "",
+            )
+        else:
+            message = getattr(event, "message", None)
+            if message is None:
+                self._logger.warning("Received event without message payload: %s", event)
+                return
+            payload = LoggedTelegramMessage(
+                chat_id=getattr(event, "chat_id", None),
+                message_id=getattr(message, "id", None),
+                date_iso=self._format_date(getattr(message, "date", None)),
+                text=getattr(message, "message", "") or "",
+            )
 
         self._logger.info(
             "chat_id=%s message_id=%s date=%s text=%s",

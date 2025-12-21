@@ -14,7 +14,6 @@ DEFAULT_SESSION_NAME = "pulsedidgest"
 class CollectorSettings:
     api_id: int
     api_hash: str
-    source_chat: str
     session_name: str
     gemini_api_key: str
     gemini_model: str | None
@@ -24,6 +23,8 @@ class CollectorSettings:
     default_tz: str
     config_sync_mode: str
     delivery_tick_seconds: int
+    refresh_seconds: int
+    source_chat_override: str | None
 
 
 @dataclass(frozen=True)
@@ -48,7 +49,7 @@ def load_env_file(dotenv_path: Path) -> None:
 def load_collector_settings() -> CollectorSettings:
     api_id = _require_env("TELEGRAM_API_ID")
     api_hash = _require_env("TELEGRAM_API_HASH")
-    source_chat = _require_env("TELEGRAM_SOURCE_CHAT")
+    source_chat = os.getenv("TELEGRAM_SOURCE_CHAT")
     session_name = os.getenv("TELETHON_SESSION_NAME", DEFAULT_SESSION_NAME)
     gemini_api_key = _require_env("GEMINI_API_KEY")
     gemini_model = os.getenv("GEMINI_MODEL") or None
@@ -58,12 +59,12 @@ def load_collector_settings() -> CollectorSettings:
     default_tz = os.getenv("DEFAULT_TZ", "Europe/Berlin")
     config_mode = os.getenv("CONFIG_SYNC_MODE", "seed_if_empty")
     delivery_tick_seconds = _get_int_env("DELIVERY_TICK_SECONDS", 60, min_value=15)
+    refresh_seconds = _get_int_env("COLLECTOR_REFRESH_SECONDS", 30, min_value=5)
     _require_env("DATABASE_URL")
 
     return CollectorSettings(
         api_id=_parse_int(api_id, "TELEGRAM_API_ID"),
         api_hash=api_hash,
-        source_chat=source_chat,
         session_name=session_name,
         gemini_api_key=gemini_api_key,
         gemini_model=gemini_model,
@@ -73,6 +74,8 @@ def load_collector_settings() -> CollectorSettings:
         default_tz=default_tz,
         config_sync_mode=config_mode,
         delivery_tick_seconds=delivery_tick_seconds,
+        refresh_seconds=refresh_seconds,
+        source_chat_override=source_chat,
     )
 
 

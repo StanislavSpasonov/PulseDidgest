@@ -1,7 +1,6 @@
 """Unified launcher for bot and collector processes."""
 from __future__ import annotations
 
-import os
 import signal
 import subprocess
 import sys
@@ -33,13 +32,7 @@ def main() -> None:
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    if os.getenv("TELEGRAM_SOURCE_CHAT"):
-        children.append(_spawn(collector_cmd))
-    else:
-        print(
-            "TELEGRAM_SOURCE_CHAT is not set; collector will not start.",
-            file=sys.stderr,
-        )
+    children.append(_spawn(collector_cmd))
     children.append(_spawn(bot_cmd))
 
     exit_code = 0

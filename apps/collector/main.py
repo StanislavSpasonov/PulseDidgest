@@ -7,27 +7,28 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from google.api_core import exceptions as google_exceptions
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.application.services.digest_engine import DigestDeliveryEngine
 from src.application.services.notifier import DebugThrottle, UserNotifier
-from src.application.services.prefilter import should_run_llm
 from src.application.use_cases.deliver_instant import DeliverInstantUseCase
 from src.application.use_cases.filter_message_with_gemini import (
     FilterMessageWithGeminiUseCase,
 )
 from src.application.use_cases.log_telegram_message import LogTelegramMessageUseCase
+from src.application.use_cases.process_incoming_message import (
+    IncomingMessage,
+    ProcessIncomingMessageUseCase,
+)
+from src.application.use_cases.routing_snapshot import GetActiveRoutingSnapshotUseCase
 from src.application.use_cases.store_message_and_decision import (
     StoreMessageAndDecisionUseCase,
 )
 from src.application.use_cases.sync_categories_and_groups_from_config import (
     SyncCategoriesAndGroupsFromConfigUseCase,
 )
-from src.domain.entities import DecisionRecord, MessageRecord
 from src.infrastructure.db.engine import get_session_factory
 from src.infrastructure.db.repositories import (
     SQLAlchemyCategoryRepository,
@@ -35,10 +36,11 @@ from src.infrastructure.db.repositories import (
     SQLAlchemyMessageDecisionRepository,
     SQLAlchemyUserRepository,
 )
-from src.infrastructure.config import load_collector_settings, load_env_file
+from src.infrastructure.collector.routing_cache import RoutingSnapshotCache
+from src.infrastructure.config import CollectorSettings, load_collector_settings, load_env_file
 from src.infrastructure.llm_gemini import GeminiFilterClient
 from src.infrastructure.telegram_bot import TelegramBotSender
-from src.infrastructure.telegram_client.collector_client import TelegramCollectorClient
+from src.infrastructure.telegram_client.collector_service import TelethonCollectorService
 
 DOTENV_PATH = PROJECT_ROOT / ".env"
 CATEGORIES_CONFIG = PROJECT_ROOT / "config" / "categories.yml"
@@ -78,7 +80,7 @@ class GeminiCooldownManager:
 async def run_collector(settings: CollectorSettings) -> None:
     logger = logging.getLogger("collector")
     session_factory = get_session_factory()
-    client = TelegramCollectorClient(
+    client = TelethonCollectorService(
         api_id=settings.api_id,
         api_hash=settings.api_hash,
         session_name=settings.session_name,
@@ -106,11 +108,15 @@ async def run_collector(settings: CollectorSettings) -> None:
         default_tz=settings.default_tz,
         logger=logger,
     )
-    category_registry = sync_use_case.execute()
-    logger.info(
-        "Category registry loaded: %s chats, mode=%s",
-        len(category_registry.chat_to_categories),
-        settings.config_sync_mode,
+    sync_use_case.execute()
+    routing_use_case = GetActiveRoutingSnapshotUseCase(
+        repository=category_repository,
+        logger=logger,
+    )
+    routing_cache = RoutingSnapshotCache(
+        use_case=routing_use_case,
+        refresh_seconds=settings.refresh_seconds,
+        logger=logger,
     )
 
     notifier: UserNotifier | None = None
@@ -147,187 +153,31 @@ async def run_collector(settings: CollectorSettings) -> None:
         logger=logger,
     )
     cooldown = GeminiCooldownManager(settings.gemini_cooldown_seconds)
+    process_use_case = ProcessIncomingMessageUseCase(
+        filter_use_case=filter_use_case,
+        store_use_case=store_use_case,
+        instant_delivery_use_case=instant_delivery,
+        notifier=notifier,
+        debug_throttle=debug_throttle,
+        cooldown=cooldown,
+        logger=logger,
+    )
 
-    async def handle_event(event):
+    async def handle_event(event: IncomingMessage) -> None:
         await log_use_case.handle(event)
-        message = getattr(event, "message", None)
-        if message is None:
-            logger.warning("Received event without message payload: %s", event)
-            return
-
-        chat_id_raw = getattr(event, "chat_id", None)
-        message_id_raw = getattr(message, "id", None)
-        if chat_id_raw is None or message_id_raw is None:
-            logger.warning(
-                "Skipping message without chat_id/id (chat=%s, message=%s)",
-                chat_id_raw,
-                message_id_raw,
-            )
-            return
-
-        try:
-            chat_id = int(chat_id_raw)
-            source_message_id = int(message_id_raw)
-        except (TypeError, ValueError):
-            logger.warning(
-                "Skipping message with non-integer identifiers (chat=%s, message=%s)",
-                chat_id_raw,
-                message_id_raw,
-            )
-            return
-
-        message_text = getattr(message, "message", "") or ""
-        if not message_text.strip():
-            logger.info(
-                "Skipping empty text message chat=%s message_id=%s",
-                chat_id,
-                source_message_id,
-            )
-            return
-
-        bindings = category_registry.get_categories_for_chat(chat_id)
-        if not bindings:
-            logger.warning(
-                "No categories configured for chat %s. "
-                "Check TELEGRAM_SOURCE_CHAT and restart collector after adding bindings.",
-                chat_id,
-            )
-            return
-        logger.info(
-            "Bindings for chat %s: %s categories (%s)",
-            chat_id,
-            len(bindings),
-            ", ".join(binding.category_name for binding in bindings),
-        )
-
-        message_record = MessageRecord(
-            source_chat_id=chat_id,
-            source_message_id=source_message_id,
-            date=getattr(message, "date", None) or datetime.utcnow(),
-            text=message_text,
-        )
-        message_db_id = await store_use_case.ensure_message(message_record)
-        if message_db_id:
-            logger.debug(
-                "Message stored chat=%s message_id=%s db_id=%s",
-                chat_id,
-                source_message_id,
-                message_db_id,
-            )
-
-        for binding in bindings:
-            if not binding.is_enabled:
-                continue
-            should_run, reason = should_run_llm(message_text, binding.prefilter)
-            if not should_run:
-                logger.info(
-                    "Prefilter skipped category=%s reason=%s",
-                    binding.category_name,
-                    reason,
-                )
-                continue
-
-            if cooldown.in_cooldown():
-                logger.warning(
-                    "Cooldown active (%ss remaining); skipping LLM for category=%s",
-                    cooldown.remaining_seconds(),
-                    binding.category_name,
-                )
-                continue
-
-            try:
-                decision = await filter_use_case.classify(
-                    message_text=message_text,
-                    category_name=binding.category_name,
-                    category_prompt=binding.prompt,
-                )
-            except google_exceptions.ResourceExhausted as exc:
-                logger.warning(
-                    "Gemini quota exhausted for category=%s: %s",
-                    binding.category_name,
-                    exc,
-                )
-                cooldown.activate()
-                await store_use_case.record_error(
-                    message_record,
-                    binding.category_id,
-                    "RESOURCE_EXHAUSTED",
-                    str(exc),
-                )
-                continue
-            except Exception as exc:  # pragma: no cover
-                logger.error(
-                    "Gemini classification failed for category=%s: %s",
-                    binding.category_name,
-                    exc,
-                )
-                await store_use_case.record_error(
-                    message_record,
-                    binding.category_id,
-                    exc.__class__.__name__,
-                    str(exc),
-                )
-                continue
-
-            decision_record = DecisionRecord(
-                category_id=binding.category_id,
-                model=decision.model,
-                prompt_name=decision.prompt_name,
-                prompt_version=decision.prompt_version,
-                passed=decision.passed,
-                score=decision.score,
-                reason=decision.reason,
-            )
-            save_result = await store_use_case.handle(message_record, decision_record)
-            if save_result is None:
-                continue
-            _, decision_db_id = save_result
-            logger.info(
-                "Decision stored category=%s pass=%s score=%.2f decision_id=%s",
-                binding.category_name,
-                decision_record.passed,
-                decision_record.score,
-                decision_db_id,
-            )
-
-            if (
-                decision_record.passed
-                and binding.delivery_mode == "instant"
-                and binding.is_enabled
-                and instant_delivery
-            ):
-                await instant_delivery.deliver(
-                    decision_db_id,
-                    decision_record,
-                    binding.category_name,
-                    message_text,
-                    binding.group_title,
-                )
-
-            if (
-                notifier
-                and binding.debug_enabled
-                and settings.admin_user_id
-            ):
-                allow, warn = debug_throttle.check(binding.category_id)
-                if allow:
-                    snippet = (message_text or "").strip()[:400]
-                    debug_text = (
-                        f"[DEBUG {binding.category_name}] pass={decision_record.passed}"
-                        f" score={decision_record.score:.2f}\n"
-                        f"Reason: {decision_record.reason}\n"
-                        f"Chat: {binding.chat_id}\n"
-                        f"{snippet}"
-                    )
-                    await notifier.notify_admin(debug_text)
-                elif warn:
-                    await notifier.notify_admin(
-                        f"[DEBUG {binding.category_name}] too many events, throttling"
-                    )
+        snapshot = routing_cache.get_snapshot()
+        await process_use_case.handle(event, snapshot)
 
     try:
-        await client.run(settings.source_chat, handle_event)
+        await routing_cache.start()
+        if settings.source_chat_override:
+            logger.info(
+                "Collector running in single-chat override mode: %s",
+                settings.source_chat_override,
+            )
+        await client.run(handle_event, chat_filter=settings.source_chat_override)
     finally:
+        await routing_cache.stop()
         if digest_engine is not None:
             await digest_engine.stop()
         if bot_sender is not None:
