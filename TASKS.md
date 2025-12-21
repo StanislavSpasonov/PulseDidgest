@@ -32,6 +32,7 @@
 - Launcher: single entrypoint runs bot + collector
 - Launcher: skip collector when TELEGRAM_SOURCE_CHAT is missing
 - Collector: dynamic routing from DB (snapshot cache + message routing)
+- Fix: user repository active users for instant delivery
 
 ## Next
 - QA: проверить collector dynamic routing (add/remove bindings, LLM calls only for active chats)

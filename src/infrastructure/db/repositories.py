@@ -480,6 +480,25 @@ class SQLAlchemyUserRepository:
         finally:
             session.close()
 
+    def get_active_users(self) -> List[UserRecord]:
+        session = self._session_factory()
+        try:
+            stmt = select(UserModel).where(UserModel.is_active.is_(True))
+            users = session.execute(stmt).scalars().all()
+            return [
+                UserRecord(
+                    id=str(user.id),
+                    tg_user_id=int(user.tg_user_id),
+                    chat_id=int(user.chat_id),
+                    username=user.username,
+                    is_active=user.is_active,
+                    created_at=user.created_at,
+                )
+                for user in users
+            ]
+        finally:
+            session.close()
+
 
 class SQLAlchemyAdminRepository:
     """Administrative helpers for the Telegram bot."""
@@ -929,22 +948,3 @@ class SQLAlchemyAdminRepository:
             session.add(link)
             session.flush()
         return link
-
-    def get_active_users(self) -> List[UserRecord]:
-        session = self._session_factory()
-        try:
-            stmt = select(UserModel).where(UserModel.is_active.is_(True))
-            users = session.execute(stmt).scalars().all()
-            return [
-                UserRecord(
-                    id=str(user.id),
-                    tg_user_id=int(user.tg_user_id),
-                    chat_id=int(user.chat_id),
-                    username=user.username,
-                    is_active=user.is_active,
-                    created_at=user.created_at,
-                )
-                for user in users
-            ]
-        finally:
-            session.close()
