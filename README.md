@@ -8,9 +8,9 @@ Early-stage MVP.
 
 1. Скопируйте `.env.example` в `.env` и заполните переменные окружения.
 2. Установите зависимости: `pip install -r requirements.txt`.
-3. Запустите collector командой `python apps/collector/main.py`.
+3. Запустите collector командой `python -m apps.collector.main` (или `python -m apps.main`, чтобы поднять bot + collector вместе).
 
-Collector автоматически загружает `.env` из корня проекта (python-dotenv), берёт `TELETHON_SESSION_NAME` из env (или использует `pulsedidgest` по умолчанию), логирует каждое новое сообщение и отправляет текст в Gemini для классификации. В логах видно, какую модель использует LLM, и решение сохраняется в PostgreSQL.
+Collector автоматически загружает `.env` из корня проекта (python-dotenv), берёт `TELETHON_SESSION_NAME` из env (или использует `pulsedidgest` по умолчанию), логирует каждое новое сообщение и отправляет текст в Gemini для классификации. Маршрутизация берётся из БД и обновляется каждые `COLLECTOR_REFRESH_SECONDS` (по умолчанию 30 сек). В логах видно, какую модель использует LLM, и решение сохраняется в PostgreSQL.
 
 ## Gemini Filter (MVP)
 
@@ -36,7 +36,7 @@ Collector использует `DATABASE_URL` во время запуска и 
 
 ## Categories & Groups (MVP)
 
-- Редактируйте `config/categories.yml`, задавая категории, промпты и список Telegram chat_id (BigInt) для каждой категории.
+- Категории и источники теперь живут в БД (бот управляет привязками). `config/categories.yml` используется только для начального сидирования, если `CONFIG_SYNC_MODE=seed_if_empty`.
 - Расширенный пример:
 
         categories:
@@ -62,7 +62,7 @@ Collector использует `DATABASE_URL` во время запуска и 
                   timezone: Europe/Berlin
                   is_enabled: true
 
-- Collector синхронизирует таблицы `categories`, `source_groups`, `category_groups` при запуске.
+- Collector может сидировать таблицы `categories`, `source_groups`, `category_groups` при запуске (если включён `CONFIG_SYNC_MODE`).
 - Проверить содержимое можно через psql: `docker compose exec postgres psql -U pulsedidgest -d pulsedidgest -c 'SELECT name FROM categories;'` и `... -c 'SELECT category_id, group_id FROM category_groups;'`.
 - Prefilter (min_length/include/exclude) выполняется до LLM; пропущенные сообщения логируются как "Prefilter skipped".
 - При ответе Gemini 429 (`RESOURCE_EXHAUSTED`) создаётся запись в `llm_errors`, включается cooldown и сообщения продолжают сохраняться без LLM-вызовов.
@@ -79,7 +79,7 @@ Collector использует `DATABASE_URL` во время запуска и 
 
 1. Создайте бота через BotFather и положите токен в `.env` (`TELEGRAM_BOT_TOKEN`).
 2. Запустите бота: `python apps/bot/main.py` и выполните `/start` из Telegram (бот ответит `Registered. chat_id=...`).
-3. Запустите collector (`python apps/collector/main.py`). Когда Gemini вернёт `pass=true`, решение будет немедленно отправлено всем активным пользователям. В сообщении отображается категория, score и исходный текст.
+3. Запустите collector (`python -m apps.collector.main`) или оба процесса сразу (`python -m apps.main`). Когда Gemini вернёт `pass=true`, решение будет немедленно отправлено всем активным пользователям. В сообщении отображается категория, score и исходный текст.
 4. Проверить доставку можно в БД: `docker compose exec postgres psql -U pulsedidgest -d pulsedidgest -c 'SELECT delivered_at FROM decisions ORDER BY created_at DESC LIMIT 5;'`.
 
 ## Managing Telegram Groups
@@ -94,7 +94,7 @@ Collector использует `DATABASE_URL` во время запуска и 
 ### Переменные окружения
 - `TELEGRAM_API_ID` — API ID Telegram (integer)
 - `TELEGRAM_API_HASH` — соответствующий API hash
-- `TELEGRAM_SOURCE_CHAT` — username или ID источника
+- `TELEGRAM_SOURCE_CHAT` — optional legacy override (single source chat for dev)
 - `TELETHON_SESSION_NAME` — имя файла сессии (опционально, по умолчанию `pulsedidgest`)
 - `TELEGRAM_BOT_TOKEN` — токен бота для /start и instant-доставки
 - `TELEGRAM_ADMIN_USER_ID` — ID администратора (для debug/бот-команд)
@@ -104,6 +104,7 @@ Collector использует `DATABASE_URL` во время запуска и 
 - `DEFAULT_TZ` — таймзона по умолчанию (используется в delivery/daily)
 - `CONFIG_SYNC_MODE` — `seed_if_empty` (по умолчанию) или `off`
 - `DELIVERY_TICK_SECONDS` — частота проверки digest-расписаний (по умолчанию 60 секунд)
+- `COLLECTOR_REFRESH_SECONDS` — частота обновления маршрутизации из БД (по умолчанию 30 секунд)
 - `DATABASE_URL` — строка подключения к PostgreSQL (например `postgresql+psycopg://user:password@localhost:5432/pulsedidgest`)
 
 ## Dev: setup + run + tests
@@ -113,7 +114,7 @@ Collector использует `DATABASE_URL` во время запуска и 
 3. Установить зависимости: `pip install -r requirements.txt`
 4. Подготовить env: `cp .env.example .env` и заполнить значения
 5. Запуск:
-   - collector: `python apps/collector/main.py`
-   - bot: `python apps/bot/main.py`
+   - collector: `python -m apps.collector.main`
+   - bot: `python -m apps.bot.main`
    - вместе: `python -m apps.main`
 6. Тесты: `python -m pytest -q`

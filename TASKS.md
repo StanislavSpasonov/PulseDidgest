@@ -31,6 +31,7 @@
 - Logging: collector pipeline diagnostics (bindings/persist/decisions)
 - Launcher: single entrypoint runs bot + collector
 - Launcher: skip collector when TELEGRAM_SOURCE_CHAT is missing
+- Collector: dynamic routing from DB (snapshot cache + message routing)
 
 ## Next
-- QA: проверить unified launcher + Bot UI по acceptance criteria
+- QA: проверить collector dynamic routing (add/remove bindings, LLM calls only for active chats)
