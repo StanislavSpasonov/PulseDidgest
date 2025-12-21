@@ -71,6 +71,7 @@ Collector использует `DATABASE_URL` во время запуска и 
 
 - Instant-доставка работает для привязок с `delivery.mode=instant`: pass=True решения улетают сразу после обработки Gemini.
 - Digest-engine запускается внутри collector (tick задаётся `DELIVERY_TICK_SECONDS`, по умолчанию 60s) и проверяет привязки с режимами `hourly`, `interval <minutes>`, `daily <HH:MM> [TZ]`.
+- В delivery сообщениях добавляются кликабельные ссылки на исходные посты и список URL из текста; длинные тексты идут как preview + ссылка на источник.
 - Для `interval` требуется `minutes>0`, для `daily` — локальное время `HH:MM` и таймзона (по умолчанию `DEFAULT_TZ`).
 - Digest состоит из заголовка `[category + group]` и списка последних непродоставленных pass-решений (score, reason, урезанный текст). После успешной отправки решения помечаются `delivered_at=NOW()` и `category_groups.last_sent_at` обновляется.
 - Debug режим (`debug_enabled: true`) шлёт админу (см. `TELEGRAM_ADMIN_USER_ID`) подробности по каждому решению, но не больше 20 событий в минуту на категорию.

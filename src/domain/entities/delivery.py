@@ -27,6 +27,8 @@ class PendingDecisionInfo:
     category_id: str
     category_name: str
     message_text: str
+    source_chat_id: int
+    source_message_id: int
     score: float
     reason: str
     created_at: datetime

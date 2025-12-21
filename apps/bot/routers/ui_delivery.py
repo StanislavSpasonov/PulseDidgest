@@ -12,6 +12,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from apps.bot.ui.callbacks import DeliveryCb, NavCb
 from apps.bot.ui.common import UiDeps, is_admin, respond
 from apps.bot.ui.list_keyboard import build_one_column_list
+from src.application.services.message_formatter import format_digest_message_html
 
 
 class DeliveryTimeState(StatesGroup):
@@ -88,17 +89,12 @@ def _format_delivery_text(category: str, links) -> str:
     return "\n".join(lines)
 
 
-def _build_digest_message(category: str, group_title: Optional[str], chat_id: int, decisions) -> str:
-    header = f"[{category}] Digest for {group_title or chat_id}"
-    lines = [header]
-    for idx, decision in enumerate(decisions, start=1):
-        text = (decision.message_text or "").strip().replace("\n", " ")
-        snippet = text[:400] + ("…" if len(text) > 400 else "")
-        lines.append(
-            f"{idx}. Score={decision.score:.2f} Reason={decision.reason}\n   {snippet}"
-        )
-    payload = "\n\n".join(lines)
-    return payload[:3500]
+def _build_digest_message(category: str, group_title: Optional[str], decisions) -> str:
+    return format_digest_message_html(
+        category_name=category,
+        group_title=group_title,
+        decisions=decisions,
+    )
 
 
 def build_router(deps: UiDeps) -> Router:
@@ -282,8 +278,12 @@ def build_router(deps: UiDeps) -> Router:
             )
             if not decisions:
                 continue
-            payload = _build_digest_message(category.name, group.title, int(group.tg_chat_id), decisions)
-            await callback.message.bot.send_message(callback.message.chat.id, payload)
+            payload = _build_digest_message(category.name, group.title, decisions)
+            await callback.message.bot.send_message(
+                callback.message.chat.id,
+                payload,
+                parse_mode="HTML",
+            )
             sent += 1
         if sent == 0:
             await respond(callback, "За последние 24 часа нет материалов для дайджеста.")

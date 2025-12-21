@@ -10,7 +10,9 @@ from datetime import datetime, timedelta
 
 
 class TelegramSenderProtocol:
-    async def send_message(self, chat_id: int, text: str) -> None:
+    async def send_message(
+        self, chat_id: int, text: str, parse_mode: str | None = None
+    ) -> None:
         raise NotImplementedError
 
     async def close(self) -> None:
@@ -32,7 +34,7 @@ class UserNotifier:
         self._admin_chat_id = admin_chat_id
         self._logger = logger or logging.getLogger("collector.notifier")
 
-    async def broadcast(self, text: str) -> bool:
+    async def broadcast(self, text: str, parse_mode: str | None = None) -> bool:
         users = await asyncio.to_thread(self._user_repository.get_active_users)
         if not users:
             self._logger.info("No active users to broadcast message")
@@ -41,7 +43,7 @@ class UserNotifier:
         delivered = False
         for user in users:
             try:
-                await self._sender.send_message(user.chat_id, text)
+                await self._sender.send_message(user.chat_id, text, parse_mode=parse_mode)
                 delivered = True
             except Exception as exc:  # pragma: no cover
                 self._logger.warning(
@@ -51,11 +53,15 @@ class UserNotifier:
                 )
         return delivered
 
-    async def notify_admin(self, text: str) -> None:
+    async def notify_admin(self, text: str, parse_mode: str | None = None) -> None:
         if not self._admin_chat_id:
             return
         try:
-            await self._sender.send_message(self._admin_chat_id, text)
+            await self._sender.send_message(
+                self._admin_chat_id,
+                text,
+                parse_mode=parse_mode,
+            )
         except Exception as exc:  # pragma: no cover
             self._logger.warning("Failed to send admin notification: %s", exc)
 

@@ -166,6 +166,8 @@ class ProcessIncomingMessageUseCase:
                     decision_record,
                     route.category_name,
                     message.text,
+                    message.chat_id,
+                    message.message_id,
                     route.group_title,
                 )
 

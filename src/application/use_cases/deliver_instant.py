@@ -5,6 +5,7 @@ import asyncio
 import logging
 from typing import Protocol
 
+from src.application.services.message_formatter import format_instant_message_html
 from src.domain.entities import DecisionRecord
 
 
@@ -32,12 +33,21 @@ class DeliverInstantUseCase:
         decision: DecisionRecord,
         category_name: str,
         message_text: str,
+        chat_id: int,
+        message_id: int,
         group_title: str | None = None,
+        username: str | None = None,
     ) -> None:
-        payload = self._build_message(
-            decision, category_name, message_text, group_title
+        payload = format_instant_message_html(
+            category_name=category_name,
+            decision=decision,
+            message_text=message_text,
+            chat_id=chat_id,
+            message_id=message_id,
+            group_title=group_title,
+            username=username,
         )
-        delivered = await self._notifier.broadcast(payload)
+        delivered = await self._notifier.broadcast(payload, parse_mode="HTML")
 
         if delivered:
             await asyncio.to_thread(
@@ -48,18 +58,3 @@ class DeliverInstantUseCase:
             self._logger.warning(
                 "Decision=%s was not delivered to any user", decision_id
             )
-
-    def _build_message(
-        self,
-        decision: DecisionRecord,
-        category_name: str,
-        message_text: str,
-        group_title: str | None,
-    ) -> str:
-        status = "✅ PASS" if decision.passed else "❌ FAIL"
-        group_label = f" ({group_title})" if group_title else ""
-        return (
-            f"[{category_name}{group_label}] {status}\n"
-            f"Score: {decision.score:.2f}\nReason: {decision.reason}\n\n"
-            f"{message_text}"
-        )

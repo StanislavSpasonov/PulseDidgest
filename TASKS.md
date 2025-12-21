@@ -33,6 +33,7 @@
 - Launcher: skip collector when TELEGRAM_SOURCE_CHAT is missing
 - Collector: dynamic routing from DB (snapshot cache + message routing)
 - Fix: user repository active users for instant delivery
+- Delivery: links + HTML formatting for instant/digest
 
 ## Next
-- QA: проверить collector dynamic routing (add/remove bindings, LLM calls only for active chats)
+- QA: проверить delivery links/preview (instant + digest)

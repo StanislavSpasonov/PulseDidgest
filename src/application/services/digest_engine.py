@@ -4,9 +4,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Iterable, List, Optional
+from typing import List, Optional
 from zoneinfo import ZoneInfo
 
+from src.application.services.message_formatter import format_digest_message_html
 from src.domain.entities import DigestGroupInfo, PendingDecisionInfo
 
 
@@ -90,8 +91,12 @@ class DigestDeliveryEngine:
             )
             if not decisions:
                 continue
-            payload = self._build_digest_message(group, decisions)
-            delivered = await self._notifier.broadcast(payload)
+            payload = format_digest_message_html(
+                category_name=group.category_name,
+                group_title=group.group_title,
+                decisions=decisions,
+            )
+            delivered = await self._notifier.broadcast(payload, parse_mode="HTML")
             if delivered:
                 ids = [d.decision_id for d in decisions]
                 await asyncio.to_thread(self._repo.mark_decisions_delivered, ids)
@@ -131,19 +136,3 @@ class DigestDeliveryEngine:
             last_local = last_sent.astimezone(tz)
             return last_local.date() < local_now.date()
         return False
-
-    def _build_digest_message(
-        self, group: DigestGroupInfo, decisions: Iterable[PendingDecisionInfo]
-    ) -> str:
-        header = (
-            f"[{group.category_name}] Digest for chat {group.group_title or group.chat_id}\n"
-        )
-        lines = [header]
-        for idx, decision in enumerate(decisions, start=1):
-            text = (decision.message_text or "").strip().replace("\n", " ")
-            snippet = text[:400] + ("…" if len(text) > 400 else "")
-            lines.append(
-                f"{idx}. Score={decision.score:.2f} Reason={decision.reason}\n   {snippet}"
-            )
-        payload = "\n\n".join(lines)
-        return payload[:3500]

@@ -11,7 +11,7 @@ class FakeNotifier:
         self._delivered = delivered
         self.payloads: list[str] = []
 
-    async def broadcast(self, text: str) -> bool:
+    async def broadcast(self, text: str, parse_mode: str | None = None) -> bool:
         self.payloads.append(text)
         return self._delivered
 
@@ -39,7 +39,7 @@ async def test_deliver_marks_decision_when_delivered() -> None:
         reason="ok",
     )
 
-    await use_case.deliver("dec-1", decision, "jobs", "hello", "Group")
+    await use_case.deliver("dec-1", decision, "jobs", "hello", 123, 321, "Group")
 
     assert repo.marked == ["dec-1"]
     assert notifier.payloads
@@ -60,6 +60,6 @@ async def test_deliver_skips_mark_when_not_delivered() -> None:
         reason="ok",
     )
 
-    await use_case.deliver("dec-1", decision, "jobs", "hello", None)
+    await use_case.deliver("dec-1", decision, "jobs", "hello", 123, 321, None)
 
     assert repo.marked == []
