@@ -41,6 +41,7 @@ from src.infrastructure.config import CollectorSettings, load_collector_settings
 from src.infrastructure.llm_gemini import GeminiFilterClient
 from src.infrastructure.telegram_bot import TelegramBotSender
 from src.infrastructure.telegram_client.collector_service import TelethonCollectorService
+from apps.bot.ui.reply_menu import build_menu_button_keyboard
 
 DOTENV_PATH = PROJECT_ROOT / ".env"
 CATEGORIES_CONFIG = PROJECT_ROOT / "config" / "categories.yml"
@@ -137,12 +138,14 @@ async def run_collector(settings: CollectorSettings) -> None:
             decision_repository=message_repository,
             notifier=notifier,
             logger=logger,
+            reply_markup_factory=build_menu_button_keyboard,
         )
         digest_engine = DigestDeliveryEngine(
             repository=delivery_repository,
             notifier=notifier,
             tick_seconds=settings.delivery_tick_seconds,
             logger=logger,
+            reply_markup_factory=build_menu_button_keyboard,
         )
         digest_engine.start()
     else:

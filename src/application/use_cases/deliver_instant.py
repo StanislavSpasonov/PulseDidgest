@@ -22,10 +22,12 @@ class DeliverInstantUseCase:
         decision_repository: DecisionDeliveryRepository,
         notifier,
         logger: logging.Logger | None = None,
+        reply_markup_factory=None,
     ) -> None:
         self._decision_repository = decision_repository
         self._notifier = notifier
         self._logger = logger or logging.getLogger("collector.delivery")
+        self._reply_markup_factory = reply_markup_factory
 
     async def deliver(
         self,
@@ -47,7 +49,14 @@ class DeliverInstantUseCase:
             group_title=group_title,
             username=username,
         )
-        delivered = await self._notifier.broadcast(payload, parse_mode="HTML")
+        reply_markup = (
+            self._reply_markup_factory() if self._reply_markup_factory else None
+        )
+        delivered = await self._notifier.broadcast(
+            payload,
+            parse_mode="HTML",
+            reply_markup=reply_markup,
+        )
 
         if delivered:
             await asyncio.to_thread(

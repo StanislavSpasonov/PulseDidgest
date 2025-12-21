@@ -13,6 +13,7 @@ from apps.bot.ui.callbacks import DeliveryCb, NavCb
 from apps.bot.ui.common import UiDeps, is_admin, respond
 from apps.bot.ui.list_keyboard import build_one_column_list
 from src.application.services.message_formatter import format_digest_message_html
+from apps.bot.ui.reply_menu import build_menu_button_keyboard
 
 
 class DeliveryTimeState(StatesGroup):
@@ -283,6 +284,7 @@ def build_router(deps: UiDeps) -> Router:
                 callback.message.chat.id,
                 payload,
                 parse_mode="HTML",
+                reply_markup=build_menu_button_keyboard(),
             )
             sent += 1
         if sent == 0:

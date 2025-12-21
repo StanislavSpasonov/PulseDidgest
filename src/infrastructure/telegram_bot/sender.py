@@ -11,12 +11,17 @@ class TelegramBotSender:
         self._bot = Bot(token=token)
 
     async def send_message(
-        self, chat_id: int, text: str, parse_mode: str | None = None
+        self,
+        chat_id: int,
+        text: str,
+        parse_mode: str | None = None,
+        reply_markup=None,
     ) -> None:
         await self._bot.send_message(
             chat_id=chat_id,
             text=text,
             parse_mode=parse_mode,
+            reply_markup=reply_markup,
         )
 
     async def close(self) -> None:

@@ -34,6 +34,7 @@ from src.infrastructure.db.repositories import (
 from src.infrastructure.telegram_client.dialog_service import TelethonDialogService
 from apps.bot.routers import ui_categories, ui_delivery, ui_groups, ui_links, ui_menu, ui_reports, ui_settings
 from apps.bot.ui.common import UiDeps, format_chat_line, is_admin
+from apps.bot.ui.reply_menu import build_menu_button_keyboard
 
 DOTENV_PATH = PROJECT_ROOT / ".env"
 
@@ -124,7 +125,7 @@ async def main() -> None:
                 "/last_pass <category> [limit], /last_fail <category> [limit]\n"
                 "/llm_errors [hours] [limit]"
             )
-        await message.answer(help_text)
+        await message.answer(help_text, reply_markup=build_menu_button_keyboard())
 
     # --------- Categories ---------
     @dp.message(Command("categories"))

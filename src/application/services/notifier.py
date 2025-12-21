@@ -11,7 +11,11 @@ from datetime import datetime, timedelta
 
 class TelegramSenderProtocol:
     async def send_message(
-        self, chat_id: int, text: str, parse_mode: str | None = None
+        self,
+        chat_id: int,
+        text: str,
+        parse_mode: str | None = None,
+        reply_markup=None,
     ) -> None:
         raise NotImplementedError
 
@@ -34,7 +38,12 @@ class UserNotifier:
         self._admin_chat_id = admin_chat_id
         self._logger = logger or logging.getLogger("collector.notifier")
 
-    async def broadcast(self, text: str, parse_mode: str | None = None) -> bool:
+    async def broadcast(
+        self,
+        text: str,
+        parse_mode: str | None = None,
+        reply_markup=None,
+    ) -> bool:
         users = await asyncio.to_thread(self._user_repository.get_active_users)
         if not users:
             self._logger.info("No active users to broadcast message")
@@ -43,7 +52,12 @@ class UserNotifier:
         delivered = False
         for user in users:
             try:
-                await self._sender.send_message(user.chat_id, text, parse_mode=parse_mode)
+                await self._sender.send_message(
+                    user.chat_id,
+                    text,
+                    parse_mode=parse_mode,
+                    reply_markup=reply_markup,
+                )
                 delivered = True
             except Exception as exc:  # pragma: no cover
                 self._logger.warning(
@@ -53,7 +67,12 @@ class UserNotifier:
                 )
         return delivered
 
-    async def notify_admin(self, text: str, parse_mode: str | None = None) -> None:
+    async def notify_admin(
+        self,
+        text: str,
+        parse_mode: str | None = None,
+        reply_markup=None,
+    ) -> None:
         if not self._admin_chat_id:
             return
         try:
@@ -61,6 +80,7 @@ class UserNotifier:
                 self._admin_chat_id,
                 text,
                 parse_mode=parse_mode,
+                reply_markup=reply_markup,
             )
         except Exception as exc:  # pragma: no cover
             self._logger.warning("Failed to send admin notification: %s", exc)

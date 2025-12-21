@@ -3,12 +3,15 @@ from __future__ import annotations
 import asyncio
 from typing import Tuple
 
-from aiogram import Router, types
+from aiogram import F, Router, types
 from aiogram.filters import Command, CommandStart
+from aiogram.fsm.context import FSMContext
+from aiogram.types import ReplyKeyboardRemove
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from apps.bot.ui.callbacks import NavCb, CategoryCb, DeliveryCb, GroupCb, LinkCb, ReportCb, SettingsCb
 from apps.bot.ui.common import UiDeps, is_admin, respond
+from apps.bot.ui.reply_menu import build_menu_button_keyboard
 
 
 def build_main_menu(admin_only: bool = True) -> Tuple[str, types.InlineKeyboardMarkup | None]:
@@ -30,8 +33,15 @@ def build_main_menu(admin_only: bool = True) -> Tuple[str, types.InlineKeyboardM
 def build_router(deps: UiDeps) -> Router:
     router = Router()
 
+    async def _attach_menu_keyboard(message: types.Message) -> None:
+        await message.answer(
+            "☰ Меню доступно снизу.",
+            reply_markup=build_menu_button_keyboard(),
+        )
+
     @router.message(CommandStart())
-    async def handle_start(message: types.Message) -> None:
+    async def handle_start(message: types.Message, state: FSMContext) -> None:
+        await state.clear()
         if not message.from_user:
             await message.answer("Cannot register without user info")
             return
@@ -45,14 +55,33 @@ def build_router(deps: UiDeps) -> Router:
             admin_only=is_admin(message.from_user.id, deps.admin_user_id)
         )
         await message.answer(menu_text, reply_markup=menu_kb)
+        await _attach_menu_keyboard(message)
 
     @router.message(Command("menu"))
-    async def handle_menu(message: types.Message) -> None:
+    async def handle_menu(message: types.Message, state: FSMContext) -> None:
+        await state.clear()
         if not message.from_user or not is_admin(message.from_user.id, deps.admin_user_id):
             await message.answer("Меню доступно только администраторам.")
             return
         menu_text, menu_kb = build_main_menu(admin_only=True)
         await message.answer(menu_text, reply_markup=menu_kb)
+        await _attach_menu_keyboard(message)
+
+    @router.message(Command("hide_menu"))
+    async def handle_hide_menu(message: types.Message, state: FSMContext) -> None:
+        await state.clear()
+        await message.answer("Меню скрыто.", reply_markup=ReplyKeyboardRemove())
+
+    @router.message(F.text == "☰ Меню")
+    async def handle_menu_button(message: types.Message, state: FSMContext) -> None:
+        await state.clear()
+        if not message.from_user or not is_admin(message.from_user.id, deps.admin_user_id):
+            await message.answer("Меню доступно только администраторам.")
+            await _attach_menu_keyboard(message)
+            return
+        menu_text, menu_kb = build_main_menu(admin_only=True)
+        await message.answer(menu_text, reply_markup=menu_kb)
+        await _attach_menu_keyboard(message)
 
     @router.callback_query(NavCb.filter())
     async def handle_nav(callback: types.CallbackQuery, callback_data: NavCb) -> None:

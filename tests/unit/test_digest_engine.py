@@ -21,7 +21,12 @@ class DummyRepo:
 
 
 class DummyNotifier:
-    async def broadcast(self, text: str, parse_mode: str | None = None) -> bool:
+    async def broadcast(
+        self,
+        text: str,
+        parse_mode: str | None = None,
+        reply_markup=None,
+    ) -> bool:
         return True
 
 

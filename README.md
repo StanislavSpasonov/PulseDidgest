@@ -82,6 +82,7 @@ Collector использует `DATABASE_URL` во время запуска и 
 2. Запустите бота: `python apps/bot/main.py` и выполните `/start` из Telegram (бот ответит `Registered. chat_id=...`).
 3. Запустите collector (`python -m apps.collector.main`) или оба процесса сразу (`python -m apps.main`). Когда Gemini вернёт `pass=true`, решение будет немедленно отправлено всем активным пользователям. В сообщении отображается категория, score и исходный текст.
 4. Проверить доставку можно в БД: `docker compose exec postgres psql -U pulsedidgest -d pulsedidgest -c 'SELECT delivered_at FROM decisions ORDER BY created_at DESC LIMIT 5;'`.
+5. Навигация: внизу всегда доступна кнопка “☰ Меню” (reply keyboard), она открывает главное меню.
 
 ## Managing Telegram Groups
 

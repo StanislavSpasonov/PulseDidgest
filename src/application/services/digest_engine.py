@@ -39,12 +39,14 @@ class DigestDeliveryEngine:
         tick_seconds: int = 60,
         max_decisions: int = 50,
         logger: Optional[logging.Logger] = None,
+        reply_markup_factory=None,
     ) -> None:
         self._repo = repository
         self._notifier = notifier
         self._tick_seconds = max(15, tick_seconds)
         self._max_decisions = max_decisions
         self._logger = logger or logging.getLogger("collector.digest")
+        self._reply_markup_factory = reply_markup_factory
         self._task: Optional[asyncio.Task] = None
         self._stop_event = asyncio.Event()
 
@@ -96,7 +98,14 @@ class DigestDeliveryEngine:
                 group_title=group.group_title,
                 decisions=decisions,
             )
-            delivered = await self._notifier.broadcast(payload, parse_mode="HTML")
+            reply_markup = (
+                self._reply_markup_factory() if self._reply_markup_factory else None
+            )
+            delivered = await self._notifier.broadcast(
+                payload,
+                parse_mode="HTML",
+                reply_markup=reply_markup,
+            )
             if delivered:
                 ids = [d.decision_id for d in decisions]
                 await asyncio.to_thread(self._repo.mark_decisions_delivered, ids)

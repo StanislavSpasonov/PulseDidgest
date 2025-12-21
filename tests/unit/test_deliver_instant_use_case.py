@@ -11,7 +11,12 @@ class FakeNotifier:
         self._delivered = delivered
         self.payloads: list[str] = []
 
-    async def broadcast(self, text: str, parse_mode: str | None = None) -> bool:
+    async def broadcast(
+        self,
+        text: str,
+        parse_mode: str | None = None,
+        reply_markup=None,
+    ) -> bool:
         self.payloads.append(text)
         return self._delivered
 

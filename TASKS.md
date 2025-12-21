@@ -36,6 +36,7 @@
 - Delivery: links + HTML formatting for instant/digest
 - Fix: separate Telethon sessions for bot/collector to avoid SQLite lock
 - Env: set COLLECTOR_TELETHON_SESSION_NAME in .env
+- UI: persistent reply keyboard with ☰ Меню button
 
 ## Next
-- QA: проверить Telethon list chats при одновременном запуске bot+collector
+- QA: проверить кнопку “☰ Меню” после digest/instant и внутри FSM
