@@ -1,9 +1,9 @@
 """Telegram client infrastructure exports."""
 
-from .collector_client import TelegramCollectorClient
 from .dialog_service import TelethonDialogService
+from .collector_service import TelethonCollectorService
 
 __all__ = [
-    "TelegramCollectorClient",
     "TelethonDialogService",
+    "TelethonCollectorService",
 ]
