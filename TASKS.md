@@ -34,6 +34,8 @@
 - Collector: dynamic routing from DB (snapshot cache + message routing)
 - Fix: user repository active users for instant delivery
 - Delivery: links + HTML formatting for instant/digest
+- Fix: separate Telethon sessions for bot/collector to avoid SQLite lock
+- Env: set COLLECTOR_TELETHON_SESSION_NAME in .env
 
 ## Next
-- QA: проверить delivery links/preview (instant + digest)
+- QA: проверить Telethon list chats при одновременном запуске bot+collector

@@ -97,6 +97,7 @@ Collector использует `DATABASE_URL` во время запуска и 
 - `TELEGRAM_API_HASH` — соответствующий API hash
 - `TELEGRAM_SOURCE_CHAT` — optional legacy override (single source chat for dev)
 - `TELETHON_SESSION_NAME` — имя файла сессии (опционально, по умолчанию `pulsedidgest`)
+- `COLLECTOR_TELETHON_SESSION_NAME` — отдельная сессия для collector (рекомендуется, чтобы избежать SQLite lock)
 - `TELEGRAM_BOT_TOKEN` — токен бота для /start и instant-доставки
 - `TELEGRAM_ADMIN_USER_ID` — ID администратора (для debug/бот-команд)
 - `GEMINI_API_KEY` — API-ключ Gemini (обязателен для фильтра)

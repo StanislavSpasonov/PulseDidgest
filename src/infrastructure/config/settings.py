@@ -50,7 +50,10 @@ def load_collector_settings() -> CollectorSettings:
     api_id = _require_env("TELEGRAM_API_ID")
     api_hash = _require_env("TELEGRAM_API_HASH")
     source_chat = os.getenv("TELEGRAM_SOURCE_CHAT")
-    session_name = os.getenv("TELETHON_SESSION_NAME", DEFAULT_SESSION_NAME)
+    session_name = os.getenv(
+        "COLLECTOR_TELETHON_SESSION_NAME",
+        os.getenv("TELETHON_SESSION_NAME", DEFAULT_SESSION_NAME),
+    )
     gemini_api_key = _require_env("GEMINI_API_KEY")
     gemini_model = os.getenv("GEMINI_MODEL") or None
     cooldown_seconds = _get_int_env("GEMINI_COOLDOWN_SECONDS", 60, min_value=0)
