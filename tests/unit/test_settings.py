@@ -32,20 +32,21 @@ def test_load_bot_settings_parses_required_env(monkeypatch: pytest.MonkeyPatch) 
 def test_load_collector_settings_enforces_min_delivery_tick(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TELEGRAM_API_ID", "123")
     monkeypatch.setenv("TELEGRAM_API_HASH", "hash")
-    monkeypatch.setenv("TELEGRAM_SOURCE_CHAT", "-100")
     monkeypatch.setenv("GEMINI_API_KEY", "key")
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost/db")
     monkeypatch.setenv("DELIVERY_TICK_SECONDS", "1")
+    monkeypatch.setenv("COLLECTOR_REFRESH_SECONDS", "10")
 
     settings = load_collector_settings()
 
     assert settings.delivery_tick_seconds == 15
+    assert settings.refresh_seconds == 10
+    assert settings.source_chat_override is None
 
 
 def test_load_collector_settings_invalid_api_id(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TELEGRAM_API_ID", "nope")
     monkeypatch.setenv("TELEGRAM_API_HASH", "hash")
-    monkeypatch.setenv("TELEGRAM_SOURCE_CHAT", "-100")
     monkeypatch.setenv("GEMINI_API_KEY", "key")
     monkeypatch.setenv("DATABASE_URL", "postgresql://user:pass@localhost/db")
 
