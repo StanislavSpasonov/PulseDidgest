@@ -271,6 +271,45 @@ class SQLAlchemyCategoryRepository:
         finally:
             session.close()
 
+    def load_active_routes(self) -> List[RuntimeCategoryGroup]:
+        session = self._session_factory()
+        try:
+            stmt = (
+                select(CategoryGroupModel, CategoryModel, SourceGroupModel)
+                .join(CategoryModel, CategoryModel.id == CategoryGroupModel.category_id)
+                .join(SourceGroupModel, SourceGroupModel.id == CategoryGroupModel.group_id)
+                .where(CategoryGroupModel.is_enabled.is_(True))
+                .where(CategoryModel.is_enabled.is_(True))
+            )
+            routes: List[RuntimeCategoryGroup] = []
+            for group_link, category, source_group in session.execute(stmt).all():
+                prefilter = PrefilterRule(
+                    min_length=category.prefilter_min_length,
+                    include_any=(category.prefilter_include_any or []),
+                    exclude_any=(category.prefilter_exclude_any or []),
+                )
+                routes.append(
+                    RuntimeCategoryGroup(
+                        category_id=str(category.id),
+                        category_name=category.name,
+                        prompt=category.prompt,
+                        debug_enabled=bool(category.debug_enabled),
+                        prefilter=prefilter,
+                        group_id=str(group_link.group_id),
+                        chat_id=int(source_group.tg_chat_id),
+                        group_title=source_group.title,
+                        delivery_mode=group_link.delivery_mode,
+                        delivery_interval_minutes=group_link.delivery_interval_minutes,
+                        delivery_time_local=group_link.delivery_time_local,
+                        delivery_timezone=group_link.delivery_tz,
+                        last_sent_at=group_link.last_sent_at,
+                        is_enabled=group_link.is_enabled,
+                    )
+                )
+            return routes
+        finally:
+            session.close()
+
 
 class SQLAlchemyDeliveryRepository:
     """Provides data for digest delivery processing."""
