@@ -7,6 +7,7 @@
 - Infrastructure — Telegram, Gemini, БД
 - Interface — форматирование и доставка сообщений
 - Для collector выбран Telethon
+- Доставка digest работает через outbox + scheduler (без прямой отправки из LLM pipeline)
 
 ## Почему так
 - Минимальная связанность

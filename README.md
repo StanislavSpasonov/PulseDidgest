@@ -69,8 +69,9 @@ Collector использует `DATABASE_URL` во время запуска и 
 
 ## Delivery Engine (Instant + Digest)
 
-- Instant-доставка работает для привязок с `delivery.mode=instant`: pass=True решения улетают сразу после обработки Gemini.
-- Digest-engine запускается внутри collector (tick задаётся `DELIVERY_TICK_SECONDS`, по умолчанию 60s) и проверяет привязки с режимами `hourly`, `interval <minutes>`, `daily <HH:MM> [TZ]`.
+- Delivery policy задаётся на уровне привязки (category↔chat): `enabled` + `mode` (`instant` или `digest`) + расписание (`hourly`/`interval`/`daily`).
+- Instant-доставка: pass=True решения отправляются сразу.
+- Digest-доставка: pass=True решения складываются в outbox и отправляются по расписанию (scheduler работает внутри collector, tick задаётся `DELIVERY_TICK_SECONDS`).
 - В delivery сообщениях добавляются кликабельные ссылки на исходные посты и список URL из текста; длинные тексты идут как preview + ссылка на источник.
 - Для `interval` требуется `minutes>0`, для `daily` — локальное время `HH:MM` и таймзона (по умолчанию `DEFAULT_TZ`).
 - Digest состоит из заголовка `[category + group]` и списка последних непродоставленных pass-решений (score, reason, урезанный текст). После успешной отправки решения помечаются `delivered_at=NOW()` и `category_groups.last_sent_at` обновляется.
@@ -83,6 +84,7 @@ Collector использует `DATABASE_URL` во время запуска и 
 3. Запустите collector (`python -m apps.collector.main`) или оба процесса сразу (`python -m apps.main`). Когда Gemini вернёт `pass=true`, решение будет немедленно отправлено всем активным пользователям. В сообщении отображается категория, score и исходный текст.
 4. Проверить доставку можно в БД: `docker compose exec postgres psql -U pulsedidgest -d pulsedidgest -c 'SELECT delivered_at FROM decisions ORDER BY created_at DESC LIMIT 5;'`.
 5. Навигация: внизу всегда доступна кнопка “☰ Меню” (reply keyboard), она открывает главное меню.
+6. Ошибки доставки: `/delivery_errors [limit]`.
 
 ## Managing Telegram Groups
 
@@ -121,3 +123,11 @@ Collector использует `DATABASE_URL` во время запуска и 
    - bot: `python -m apps.bot.main`
    - вместе: `python -m apps.main`
 6. Тесты: `python -m pytest -q`
+
+## Smoke Run (manual)
+
+1. `docker compose up -d`
+2. `alembic upgrade head`
+3. `python -m apps.main`
+4. В боте: создать категорию + промпт, добавить группу, сделать привязку.
+5. Включить доставку (instant или digest), отправить сообщение в группе и проверить доставку/логи.

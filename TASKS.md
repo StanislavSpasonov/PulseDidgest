@@ -1,8 +1,6 @@
 # PulseDidgest — Tasks
 
 ## Backlog
-- Digest delivery (hourly / daily)
-- DeliveryPolicy per category
 - Multi-user support
 
 ## In Progress
@@ -37,6 +35,7 @@
 - Fix: separate Telethon sessions for bot/collector to avoid SQLite lock
 - Env: set COLLECTOR_TELETHON_SESSION_NAME in .env
 - UI: persistent reply keyboard with ☰ Меню button
+- Epic: MVP hardening (dynamic routing, delivery outbox/scheduler, formatting, UX, tests, docs)
 
 ## Next
-- QA: проверить кнопку “☰ Меню” после digest/instant и внутри FSM
+- AWS deploy prep: docker/systemd service + env/secrets + logging/monitoring checklist
