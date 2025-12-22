@@ -11,6 +11,7 @@ from src.application.services.delivery_policy import DeliveryPolicy, compute_due
 from src.application.services.message_formatter import (
     format_digest_from_items_html,
     format_item_html,
+    split_message,
 )
 from src.application.use_cases.routing_snapshot import CategoryRoute
 from src.domain.entities import DeliveryOutboxItem, DecisionRecord
@@ -158,11 +159,16 @@ class DeliveryOutboxScheduler:
             reply_markup = (
                 self._reply_markup_factory() if self._reply_markup_factory else None
             )
-            delivered = await self._notifier.broadcast(
-                payload,
-                parse_mode="HTML",
-                reply_markup=reply_markup,
-            )
+            delivered = True
+            for chunk in split_message(payload):
+                ok = await self._notifier.broadcast(
+                    chunk,
+                    parse_mode="HTML",
+                    reply_markup=reply_markup,
+                )
+                if not ok:
+                    delivered = False
+                    break
             if delivered:
                 await asyncio.to_thread(self._repo.mark_sent, ids, now)
                 for item in group_items:

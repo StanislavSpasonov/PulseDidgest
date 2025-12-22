@@ -9,6 +9,7 @@ from src.domain.entities import DecisionRecord, PendingDecisionInfo
 
 _URL_PATTERN = re.compile(r"(https?://[^\s<>]+|t\.me/[^\s<>]+)", re.IGNORECASE)
 _TRAILING_PUNCT = ".,;:!?)]}\"'"
+_MAX_MESSAGE_LEN = 3500
 
 
 def build_source_link(chat_id: int, username: Optional[str], message_id: int) -> str:
@@ -161,3 +162,30 @@ def format_digest_from_items_html(
     for idx, item in enumerate(items, start=1):
         blocks.append(f"<b>{idx}.</b>\n{item}")
     return "\n\n".join(blocks)
+
+
+def split_message(text: str, max_len: int = _MAX_MESSAGE_LEN) -> list[str]:
+    if len(text) <= max_len:
+        return [text]
+    parts = text.split("\n\n")
+    chunks: list[str] = []
+    current = ""
+    for part in parts:
+        if not part:
+            continue
+        candidate = f"{current}\n\n{part}" if current else part
+        if len(candidate) <= max_len:
+            current = candidate
+            continue
+        if current:
+            chunks.append(current)
+        if len(part) <= max_len:
+            current = part
+        else:
+            while part:
+                chunks.append(part[:max_len])
+                part = part[max_len:]
+            current = ""
+    if current:
+        chunks.append(current)
+    return chunks

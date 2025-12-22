@@ -12,7 +12,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from apps.bot.ui.callbacks import DeliveryCb, NavCb
 from apps.bot.ui.common import UiDeps, is_admin, respond
 from apps.bot.ui.list_keyboard import build_one_column_list
-from src.application.services.message_formatter import format_digest_message_html
+from src.application.services.message_formatter import format_digest_message_html, split_message
 from apps.bot.ui.reply_menu import build_menu_button_keyboard
 
 
@@ -280,12 +280,13 @@ def build_router(deps: UiDeps) -> Router:
             if not decisions:
                 continue
             payload = _build_digest_message(category.name, group.title, decisions)
-            await callback.message.bot.send_message(
-                callback.message.chat.id,
-                payload,
-                parse_mode="HTML",
-                reply_markup=build_menu_button_keyboard(),
-            )
+            for chunk in split_message(payload):
+                await callback.message.bot.send_message(
+                    callback.message.chat.id,
+                    chunk,
+                    parse_mode="HTML",
+                    reply_markup=build_menu_button_keyboard(),
+                )
             sent += 1
         if sent == 0:
             await respond(callback, "За последние 24 часа нет материалов для дайджеста.")
