@@ -146,3 +146,18 @@ def format_digest_message_html(
         )
         blocks.append(f"<b>{idx}.</b>\n{item}")
     return "\n\n".join(blocks)
+
+
+def format_digest_from_items_html(
+    *,
+    category_name: str,
+    group_title: Optional[str],
+    items: Iterable[str],
+) -> str:
+    header = f"<b>[{html.escape(category_name)}] Digest</b>"
+    if group_title:
+        header = f"{header} <b>({html.escape(group_title)})</b>"
+    blocks: List[str] = [header]
+    for idx, item in enumerate(items, start=1):
+        blocks.append(f"<b>{idx}.</b>\n{item}")
+    return "\n\n".join(blocks)

@@ -86,6 +86,7 @@ class AddGroupByNameUseCase:
             self._admin_repository.register_group,
             chat.chat_id,
             chat.title or chat.username,
+            chat.username,
         )
         self._logger.info(
             "Registered group %s chat_id=%s via query '%s'",

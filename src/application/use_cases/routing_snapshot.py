@@ -18,11 +18,17 @@ class CategoryRoute:
     group_id: str
     chat_id: int
     group_title: str | None
+    group_username: str | None
     delivery_mode: str
     delivery_interval_minutes: int | None
     delivery_time_local: str | None
     delivery_timezone: str
     is_enabled: bool
+    category_delivery_mode: str
+    category_delivery_interval_minutes: int | None
+    category_delivery_time_local: str | None
+    category_delivery_timezone: str
+    category_delivery_enabled: bool
 
 
 @dataclass(frozen=True)
@@ -63,11 +69,17 @@ class GetActiveRoutingSnapshotUseCase:
                 group_id=route.group_id,
                 chat_id=route.chat_id,
                 group_title=route.group_title,
+                group_username=route.group_username,
                 delivery_mode=route.delivery_mode,
                 delivery_interval_minutes=route.delivery_interval_minutes,
                 delivery_time_local=route.delivery_time_local,
                 delivery_timezone=route.delivery_timezone,
                 is_enabled=route.is_enabled,
+                category_delivery_mode=route.category_delivery_mode,
+                category_delivery_interval_minutes=route.category_delivery_interval_minutes,
+                category_delivery_time_local=route.category_delivery_time_local,
+                category_delivery_timezone=route.category_delivery_timezone,
+                category_delivery_enabled=route.category_delivery_enabled,
             )
             mapping.setdefault(route.chat_id, []).append(item)
 

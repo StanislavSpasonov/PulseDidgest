@@ -11,8 +11,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.application.services.digest_engine import DigestDeliveryEngine
 from src.application.services.notifier import DebugThrottle, UserNotifier
+from src.application.use_cases.delivery_outbox import (
+    DeliveryOutboxScheduler,
+    EnqueueDeliveryOutboxUseCase,
+)
 from src.application.use_cases.deliver_instant import DeliverInstantUseCase
 from src.application.use_cases.filter_message_with_gemini import (
     FilterMessageWithGeminiUseCase,
@@ -32,7 +35,7 @@ from src.application.use_cases.sync_categories_and_groups_from_config import (
 from src.infrastructure.db.engine import get_session_factory
 from src.infrastructure.db.repositories import (
     SQLAlchemyCategoryRepository,
-    SQLAlchemyDeliveryRepository,
+    SQLAlchemyDeliveryOutboxRepository,
     SQLAlchemyMessageDecisionRepository,
     SQLAlchemyUserRepository,
 )
@@ -99,7 +102,6 @@ async def run_collector(settings: CollectorSettings) -> None:
     )
     message_repository = SQLAlchemyMessageDecisionRepository(session_factory=session_factory)
     category_repository = SQLAlchemyCategoryRepository(session_factory=session_factory)
-    delivery_repository = SQLAlchemyDeliveryRepository(session_factory=session_factory)
     user_repository = SQLAlchemyUserRepository(session_factory=session_factory)
 
     sync_use_case = SyncCategoriesAndGroupsFromConfigUseCase(
@@ -123,8 +125,11 @@ async def run_collector(settings: CollectorSettings) -> None:
     notifier: UserNotifier | None = None
     bot_sender: TelegramBotSender | None = None
     instant_delivery: DeliverInstantUseCase | None = None
-    digest_engine: DigestDeliveryEngine | None = None
+    outbox_scheduler: DeliveryOutboxScheduler | None = None
     debug_throttle = DebugThrottle()
+
+    outbox_repo = SQLAlchemyDeliveryOutboxRepository(session_factory=session_factory)
+    outbox_use_case = EnqueueDeliveryOutboxUseCase(repository=outbox_repo, logger=logger)
 
     if settings.bot_token:
         bot_sender = TelegramBotSender(settings.bot_token)
@@ -140,14 +145,15 @@ async def run_collector(settings: CollectorSettings) -> None:
             logger=logger,
             reply_markup_factory=build_menu_button_keyboard,
         )
-        digest_engine = DigestDeliveryEngine(
-            repository=delivery_repository,
+        outbox_scheduler = DeliveryOutboxScheduler(
+            repository=outbox_repo,
             notifier=notifier,
+            decision_repository=message_repository,
             tick_seconds=settings.delivery_tick_seconds,
             logger=logger,
             reply_markup_factory=build_menu_button_keyboard,
         )
-        digest_engine.start()
+        outbox_scheduler.start()
     else:
         logger.info("TELEGRAM_BOT_TOKEN not configured; delivery and debug notifications disabled")
 
@@ -160,6 +166,7 @@ async def run_collector(settings: CollectorSettings) -> None:
         filter_use_case=filter_use_case,
         store_use_case=store_use_case,
         instant_delivery_use_case=instant_delivery,
+        outbox_use_case=outbox_use_case,
         notifier=notifier,
         debug_throttle=debug_throttle,
         cooldown=cooldown,
@@ -181,8 +188,8 @@ async def run_collector(settings: CollectorSettings) -> None:
         await client.run(handle_event, chat_filter=settings.source_chat_override)
     finally:
         await routing_cache.stop()
-        if digest_engine is not None:
-            await digest_engine.stop()
+        if outbox_scheduler is not None:
+            await outbox_scheduler.stop()
         if bot_sender is not None:
             await bot_sender.close()
 

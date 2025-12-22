@@ -44,7 +44,7 @@ async def test_deliver_marks_decision_when_delivered() -> None:
         reason="ok",
     )
 
-    await use_case.deliver("dec-1", decision, "jobs", "hello", 123, 321, "Group")
+    await use_case.deliver("dec-1", decision, "jobs", "hello", 123, 321, "Group", "channel")
 
     assert repo.marked == ["dec-1"]
     assert notifier.payloads
@@ -65,6 +65,6 @@ async def test_deliver_skips_mark_when_not_delivered() -> None:
         reason="ok",
     )
 
-    await use_case.deliver("dec-1", decision, "jobs", "hello", 123, 321, None)
+    await use_case.deliver("dec-1", decision, "jobs", "hello", 123, 321, None, None)
 
     assert repo.marked == []

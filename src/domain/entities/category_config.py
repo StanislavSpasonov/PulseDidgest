@@ -33,12 +33,18 @@ class RuntimeCategoryGroup:
     group_id: str
     chat_id: int
     group_title: Optional[str]
+    group_username: Optional[str]
     delivery_mode: str
     delivery_interval_minutes: Optional[int]
     delivery_time_local: Optional[str]
     delivery_timezone: str
     last_sent_at: Optional[datetime]
     is_enabled: bool
+    category_delivery_mode: str
+    category_delivery_interval_minutes: Optional[int]
+    category_delivery_time_local: Optional[str]
+    category_delivery_timezone: str
+    category_delivery_enabled: bool
 
 
 @dataclass(frozen=True)

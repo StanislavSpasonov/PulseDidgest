@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from src.domain.entities import (
     CategoryGroupBinding,
     DigestGroupInfo,
+    DeliveryOutboxItem,
     PendingDecisionInfo,
     PrefilterRule,
     RuntimeCategoryGroup,
@@ -23,6 +24,7 @@ from .models import (
     CategoryGroupModel,
     CategoryModel,
     DecisionModel,
+    DeliveryOutboxModel,
     LLMErrorModel,
     MessageModel,
     SourceGroupModel,
@@ -259,12 +261,18 @@ class SQLAlchemyCategoryRepository:
                     group_id=str(group_link.group_id),
                     chat_id=int(source_group.tg_chat_id),
                     group_title=source_group.title,
+                    group_username=source_group.username,
                     delivery_mode=group_link.delivery_mode,
                     delivery_interval_minutes=group_link.delivery_interval_minutes,
                     delivery_time_local=group_link.delivery_time_local,
                     delivery_timezone=group_link.delivery_tz,
                     last_sent_at=group_link.last_sent_at,
                     is_enabled=group_link.is_enabled,
+                    category_delivery_mode=category.default_delivery_mode,
+                    category_delivery_interval_minutes=category.default_delivery_interval_minutes,
+                    category_delivery_time_local=category.default_delivery_time_local,
+                    category_delivery_timezone=category.default_delivery_tz,
+                    category_delivery_enabled=bool(category.default_delivery_enabled),
                 )
                 mapping.setdefault(runtime.chat_id, []).append(runtime)
             return mapping
@@ -298,12 +306,18 @@ class SQLAlchemyCategoryRepository:
                         group_id=str(group_link.group_id),
                         chat_id=int(source_group.tg_chat_id),
                         group_title=source_group.title,
+                        group_username=source_group.username,
                         delivery_mode=group_link.delivery_mode,
                         delivery_interval_minutes=group_link.delivery_interval_minutes,
                         delivery_time_local=group_link.delivery_time_local,
                         delivery_timezone=group_link.delivery_tz,
                         last_sent_at=group_link.last_sent_at,
                         is_enabled=group_link.is_enabled,
+                        category_delivery_mode=category.default_delivery_mode,
+                        category_delivery_interval_minutes=category.default_delivery_interval_minutes,
+                        category_delivery_time_local=category.default_delivery_time_local,
+                        category_delivery_timezone=category.default_delivery_tz,
+                        category_delivery_enabled=bool(category.default_delivery_enabled),
                     )
                 )
             return routes
@@ -451,6 +465,151 @@ class SQLAlchemyDeliveryRepository:
         except Exception:
             session.rollback()
             raise
+        finally:
+            session.close()
+
+
+class SQLAlchemyDeliveryOutboxRepository:
+    """Stores delivery outbox items for scheduled sending."""
+
+    def __init__(self, session_factory: Callable[[], Session]) -> None:
+        self._session_factory = session_factory
+
+    def enqueue(self, item: DeliveryOutboxItem) -> None:
+        session = self._session_factory()
+        try:
+            model = DeliveryOutboxModel(
+                id=uuid.UUID(item.id),
+                user_id=uuid.UUID(item.user_id) if item.user_id else None,
+                decision_id=uuid.UUID(item.decision_id),
+                category_id=uuid.UUID(item.category_id),
+                category_name=item.category_name,
+                chat_id=item.chat_id,
+                source_message_id=item.source_message_id,
+                message_text=item.message_text,
+                score=item.score,
+                reason=item.reason,
+                group_title=item.group_title,
+                group_username=item.group_username,
+                payload=item.payload,
+                due_at=item.due_at,
+                created_at=item.created_at,
+                sent_at=item.sent_at,
+                last_error=item.last_error,
+            )
+            session.add(model)
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def fetch_due(self, now: datetime, limit: int = 200) -> List[DeliveryOutboxItem]:
+        session = self._session_factory()
+        try:
+            stmt = (
+                select(DeliveryOutboxModel)
+                .where(DeliveryOutboxModel.sent_at.is_(None))
+                .where(DeliveryOutboxModel.due_at <= now)
+                .order_by(DeliveryOutboxModel.due_at.asc())
+                .limit(limit)
+            )
+            rows = session.execute(stmt).scalars().all()
+            return [
+                DeliveryOutboxItem(
+                    id=str(row.id),
+                    user_id=str(row.user_id) if row.user_id else None,
+                    decision_id=str(row.decision_id),
+                    category_id=str(row.category_id),
+                    category_name=row.category_name,
+                    chat_id=int(row.chat_id),
+                    source_message_id=int(row.source_message_id),
+                    message_text=row.message_text,
+                    score=row.score,
+                    reason=row.reason,
+                    group_title=row.group_title,
+                    group_username=row.group_username,
+                    payload=row.payload,
+                    due_at=row.due_at,
+                    created_at=row.created_at,
+                    sent_at=row.sent_at,
+                    last_error=row.last_error,
+                )
+                for row in rows
+            ]
+        finally:
+            session.close()
+
+    def mark_sent(self, ids: List[str], sent_at: datetime) -> None:
+        if not ids:
+            return
+        session = self._session_factory()
+        try:
+            stmt = (
+                select(DeliveryOutboxModel)
+                .where(DeliveryOutboxModel.id.in_([uuid.UUID(i) for i in ids]))
+            )
+            for row in session.execute(stmt).scalars().all():
+                row.sent_at = sent_at
+                row.last_error = None
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def record_error(self, item_id: str, error_text: str) -> None:
+        session = self._session_factory()
+        try:
+            row = session.execute(
+                select(DeliveryOutboxModel).where(
+                    DeliveryOutboxModel.id == uuid.UUID(item_id)
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                return
+            row.last_error = error_text
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def list_errors(self, limit: int = 50) -> List[DeliveryOutboxItem]:
+        session = self._session_factory()
+        try:
+            stmt = (
+                select(DeliveryOutboxModel)
+                .where(DeliveryOutboxModel.last_error.is_not(None))
+                .order_by(DeliveryOutboxModel.created_at.desc())
+                .limit(limit)
+            )
+            rows = session.execute(stmt).scalars().all()
+            return [
+                DeliveryOutboxItem(
+                    id=str(row.id),
+                    user_id=str(row.user_id) if row.user_id else None,
+                    decision_id=str(row.decision_id),
+                    category_id=str(row.category_id),
+                    category_name=row.category_name,
+                    chat_id=int(row.chat_id),
+                    source_message_id=int(row.source_message_id),
+                    message_text=row.message_text,
+                    score=row.score,
+                    reason=row.reason,
+                    group_title=row.group_title,
+                    group_username=row.group_username,
+                    payload=row.payload,
+                    due_at=row.due_at,
+                    created_at=row.created_at,
+                    sent_at=row.sent_at,
+                    last_error=row.last_error,
+                )
+                for row in rows
+            ]
         finally:
             session.close()
 class SQLAlchemyUserRepository:
@@ -639,18 +798,24 @@ class SQLAlchemyAdminRepository:
         finally:
             session.close()
 
-    def register_group(self, chat_id: int, title: Optional[str]) -> None:
+    def register_group(
+        self, chat_id: int, title: Optional[str], username: Optional[str] = None
+    ) -> None:
         session = self._session_factory()
         try:
             group = session.execute(
                 select(SourceGroupModel).where(SourceGroupModel.tg_chat_id == chat_id)
             ).scalar_one_or_none()
             if group is None:
-                group = SourceGroupModel(tg_chat_id=chat_id, title=title)
+                group = SourceGroupModel(
+                    tg_chat_id=chat_id, title=title, username=username
+                )
                 session.add(group)
             else:
                 if title:
                     group.title = title
+                if username:
+                    group.username = username
             session.commit()
         except Exception:
             session.rollback()

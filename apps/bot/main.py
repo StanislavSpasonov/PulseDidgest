@@ -29,6 +29,7 @@ from src.infrastructure.db.engine import get_session_factory
 from src.infrastructure.db.repositories import (
     SQLAlchemyAdminRepository,
     SQLAlchemyDeliveryRepository,
+    SQLAlchemyDeliveryOutboxRepository,
     SQLAlchemyUserRepository,
 )
 from src.infrastructure.telegram_client.dialog_service import TelethonDialogService
@@ -64,6 +65,7 @@ async def main() -> None:
     user_repo = SQLAlchemyUserRepository(session_factory=session_factory)
     admin_repo = SQLAlchemyAdminRepository(session_factory=session_factory)
     delivery_repo = SQLAlchemyDeliveryRepository(session_factory=session_factory)
+    outbox_repo = SQLAlchemyDeliveryOutboxRepository(session_factory=session_factory)
     dialog_service = TelethonDialogService(
         api_id=telethon_api_id,
         api_hash=telethon_api_hash,
@@ -123,9 +125,31 @@ async def main() -> None:
                 "/report <category> [hours] [limit]\n"
                 "/report_group <category> <chat_id> [hours] [limit]\n"
                 "/last_pass <category> [limit], /last_fail <category> [limit]\n"
-                "/llm_errors [hours] [limit]"
+                "/llm_errors [hours] [limit]\n"
+                "/delivery_errors [limit]"
             )
         await message.answer(help_text, reply_markup=build_menu_button_keyboard())
+
+    @dp.message(Command("delivery_errors"))
+    async def handle_delivery_errors(message: types.Message) -> None:
+        if not is_admin(message.from_user.id if message.from_user else None, admin_user_id):
+            await message.answer("Admin only")
+            return
+        parts = message.text.split(maxsplit=1)
+        limit = 20
+        if len(parts) > 1 and parts[1].isdigit():
+            limit = min(100, max(1, int(parts[1])))
+        errors = await asyncio.to_thread(outbox_repo.list_errors, limit)
+        if not errors:
+            await message.answer("No delivery errors found")
+            return
+        lines = ["Delivery errors:"]
+        for item in errors:
+            lines.append(
+                f"- {item.category_name} chat_id={item.chat_id} msg_id={item.source_message_id}\n"
+                f"  error={item.last_error}"
+            )
+        await message.answer("\n".join(lines))
 
     # --------- Categories ---------
     @dp.message(Command("categories"))
@@ -309,7 +333,7 @@ async def main() -> None:
             await message.answer("chat_id must be integer")
             return
         title = parts[2].strip() if len(parts) > 2 else None
-        await asyncio.to_thread(admin_repo.register_group, chat_id, title)
+        await asyncio.to_thread(admin_repo.register_group, chat_id, title, None)
         await message.answer(f"Group registered manually: {chat_id}")
 
     @dp.message(Command("group_add_name"))

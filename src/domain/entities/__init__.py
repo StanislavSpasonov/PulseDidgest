@@ -13,6 +13,7 @@ from .category_config import (
 )
 from .user import UserRecord
 from .delivery import DigestGroupInfo, PendingDecisionInfo
+from .delivery_outbox import DeliveryOutboxItem
 from .telegram_chat import TelegramChatInfo
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "CategoryGroupBinding",
     "UserRecord",
     "DigestGroupInfo",
+    "DeliveryOutboxItem",
     "PendingDecisionInfo",
     "TelegramChatInfo",
 ]

@@ -21,10 +21,12 @@ class FakeDialogService:
 
 class FakeAdminRepo:
     def __init__(self) -> None:
-        self.registered: list[tuple[int, str | None]] = []
+        self.registered: list[tuple[int, str | None, str | None]] = []
 
-    def register_group(self, chat_id: int, title: str | None) -> None:
-        self.registered.append((chat_id, title))
+    def register_group(
+        self, chat_id: int, title: str | None, username: str | None = None
+    ) -> None:
+        self.registered.append((chat_id, title, username))
 
 
 @pytest.mark.asyncio
@@ -46,7 +48,7 @@ async def test_add_group_by_username() -> None:
     result = await use_case.execute("@jobs")
 
     assert result.chat_id == 2
-    assert repo.registered == [(2, "jobs")]
+    assert repo.registered == [(2, "jobs", "jobs")]
 
 
 @pytest.mark.asyncio

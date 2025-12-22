@@ -257,7 +257,10 @@ def build_router(deps: UiDeps) -> Router:
             return
         try:
             await asyncio.to_thread(
-                deps.admin_repo.register_group, chat.chat_id, chat.title or chat.username
+                deps.admin_repo.register_group,
+                chat.chat_id,
+                chat.title or chat.username,
+                chat.username,
             )
             deps.logger.info("Group registered via UI: %s", chat.chat_id)
         except Exception as exc:
