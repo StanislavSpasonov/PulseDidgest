@@ -36,6 +36,7 @@ from src.infrastructure.db.engine import get_session_factory
 from src.infrastructure.db.repositories import (
     SQLAlchemyCategoryRepository,
     SQLAlchemyDeliveryOutboxRepository,
+    SQLAlchemyDeliveryRepository,
     SQLAlchemyMessageDecisionRepository,
     SQLAlchemyUserRepository,
 )
@@ -102,6 +103,7 @@ async def run_collector(settings: CollectorSettings) -> None:
     )
     message_repository = SQLAlchemyMessageDecisionRepository(session_factory=session_factory)
     category_repository = SQLAlchemyCategoryRepository(session_factory=session_factory)
+    delivery_repository = SQLAlchemyDeliveryRepository(session_factory=session_factory)
     user_repository = SQLAlchemyUserRepository(session_factory=session_factory)
 
     sync_use_case = SyncCategoriesAndGroupsFromConfigUseCase(
@@ -149,6 +151,7 @@ async def run_collector(settings: CollectorSettings) -> None:
             repository=outbox_repo,
             notifier=notifier,
             decision_repository=message_repository,
+            delivery_repository=delivery_repository,
             tick_seconds=settings.delivery_tick_seconds,
             logger=logger,
             reply_markup_factory=build_menu_button_keyboard,

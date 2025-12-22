@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Dict, List, Protocol, Set
 
 from src.domain.entities import PrefilterRule, RuntimeCategoryGroup
@@ -29,6 +30,7 @@ class CategoryRoute:
     category_delivery_time_local: str | None
     category_delivery_timezone: str
     category_delivery_enabled: bool
+    last_sent_at: datetime | None
 
 
 @dataclass(frozen=True)
@@ -80,6 +82,7 @@ class GetActiveRoutingSnapshotUseCase:
                 category_delivery_time_local=route.category_delivery_time_local,
                 category_delivery_timezone=route.category_delivery_timezone,
                 category_delivery_enabled=route.category_delivery_enabled,
+                last_sent_at=route.last_sent_at,
             )
             mapping.setdefault(route.chat_id, []).append(item)
 

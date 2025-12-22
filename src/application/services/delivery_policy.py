@@ -18,6 +18,7 @@ class DeliveryPolicy:
     time_local: Optional[str]
     timezone: str
     source: str
+    last_sent_at: Optional[datetime]
 
 
 def resolve_delivery_policy(route: CategoryRoute) -> DeliveryPolicy:
@@ -39,6 +40,7 @@ def resolve_delivery_policy(route: CategoryRoute) -> DeliveryPolicy:
         time_local=time_local,
         timezone=timezone_value,
         source="binding" if route.delivery_mode else "category",
+        last_sent_at=route.last_sent_at,
     )
 
 
@@ -46,12 +48,15 @@ def compute_due_at(policy: DeliveryPolicy, now: Optional[datetime] = None) -> da
     now = now or datetime.now(timezone.utc)
     if policy.mode == "instant":
         return now
+    if policy.last_sent_at is None:
+        return now
+    last_sent = policy.last_sent_at
     schedule = policy.schedule
     if schedule == "hourly":
-        return now + timedelta(hours=1)
+        return max(now, last_sent + timedelta(hours=1))
     if schedule == "interval":
         minutes = policy.interval_minutes or 60
-        return now + timedelta(minutes=max(1, minutes))
+        return max(now, last_sent + timedelta(minutes=max(1, minutes)))
     if schedule == "daily":
         if not policy.time_local:
             return now + timedelta(days=1)
@@ -67,5 +72,6 @@ def compute_due_at(policy: DeliveryPolicy, now: Optional[datetime] = None) -> da
         target = local_now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if target <= local_now:
             target = target + timedelta(days=1)
-        return target.astimezone(timezone.utc)
+        next_run = target.astimezone(timezone.utc)
+        return max(now, next_run)
     return now + timedelta(minutes=30)

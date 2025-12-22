@@ -101,6 +101,7 @@ class DeliveryOutboxScheduler:
         repository: DeliveryOutboxRepository,
         notifier: NotifierProtocol,
         decision_repository: DecisionDeliveryRepository,
+        delivery_repository=None,
         tick_seconds: int = 60,
         logger: logging.Logger | None = None,
         reply_markup_factory=None,
@@ -108,6 +109,7 @@ class DeliveryOutboxScheduler:
         self._repo = repository
         self._notifier = notifier
         self._decision_repo = decision_repository
+        self._delivery_repo = delivery_repository
         self._tick_seconds = max(15, tick_seconds)
         self._logger = logger or logging.getLogger("collector.delivery_outbox")
         self._reply_markup_factory = reply_markup_factory
@@ -166,6 +168,13 @@ class DeliveryOutboxScheduler:
                 for item in group_items:
                     await asyncio.to_thread(
                         self._decision_repo.mark_decision_delivered, item.decision_id
+                    )
+                if self._delivery_repo:
+                    await asyncio.to_thread(
+                        self._delivery_repo.update_last_sent_by_chat,
+                        group_items[0].category_id,
+                        group_items[0].chat_id,
+                        now,
                     )
             else:
                 for item in group_items:

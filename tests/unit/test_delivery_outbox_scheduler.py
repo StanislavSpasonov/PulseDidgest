@@ -24,6 +24,14 @@ class FakeRepo:
         self.errors.append((item_id, error_text))
 
 
+class FakeDeliveryRepo:
+    def __init__(self):
+        self.calls = []
+
+    def update_last_sent_by_chat(self, category_id, chat_id, timestamp):
+        self.calls.append((category_id, chat_id, timestamp))
+
+
 class FakeNotifier:
     def __init__(self, delivered=True):
         self.delivered = delivered
@@ -69,9 +77,17 @@ async def test_outbox_scheduler_marks_sent() -> None:
     repo = FakeRepo([_item("1", "dec-1"), _item("2", "dec-2")])
     notifier = FakeNotifier(delivered=True)
     decision_repo = FakeDecisionRepo()
-    scheduler = DeliveryOutboxScheduler(repo, notifier, decision_repo, tick_seconds=60)
+    delivery_repo = FakeDeliveryRepo()
+    scheduler = DeliveryOutboxScheduler(
+        repo,
+        notifier,
+        decision_repo,
+        delivery_repository=delivery_repo,
+        tick_seconds=60,
+    )
 
     await scheduler._tick()
 
     assert repo.sent
     assert len(decision_repo.marked) == 2
+    assert delivery_repo.calls

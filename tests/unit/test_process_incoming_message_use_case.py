@@ -92,6 +92,7 @@ def _route(chat_id: int, category_id: str, category_name: str) -> CategoryRoute:
         category_delivery_time_local=None,
         category_delivery_timezone="UTC",
         category_delivery_enabled=True,
+        last_sent_at=None,
     )
 
 

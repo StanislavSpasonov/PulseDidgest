@@ -468,6 +468,29 @@ class SQLAlchemyDeliveryRepository:
         finally:
             session.close()
 
+    def update_last_sent_by_chat(
+        self, category_id: str, chat_id: int, timestamp
+    ) -> None:
+        session = self._session_factory()
+        try:
+            stmt = (
+                select(CategoryGroupModel, SourceGroupModel)
+                .join(SourceGroupModel, SourceGroupModel.id == CategoryGroupModel.group_id)
+                .where(CategoryGroupModel.category_id == uuid.UUID(category_id))
+                .where(SourceGroupModel.tg_chat_id == chat_id)
+            )
+            row = session.execute(stmt).first()
+            if not row:
+                return
+            link, _ = row
+            link.last_sent_at = timestamp
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
 
 class SQLAlchemyDeliveryOutboxRepository:
     """Stores delivery outbox items for scheduled sending."""

@@ -26,6 +26,7 @@ def _route(**kwargs) -> CategoryRoute:
         category_delivery_time_local=None,
         category_delivery_timezone="UTC",
         category_delivery_enabled=True,
+        last_sent_at=None,
     )
     base.update(kwargs)
     return CategoryRoute(**base)
