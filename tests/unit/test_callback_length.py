@@ -6,8 +6,11 @@ from apps.bot.ui.callbacks import (
     AccessCb,
     CategoryCb,
     DeliveryCb,
+    GroupCb,
     InboxCb,
     LinkCb,
+    LinkSelectCb,
+    ReportCb,
     UserCb,
     UserDeliveryCb,
 )
@@ -26,7 +29,8 @@ def test_callback_payload_lengths_fit_telegram_limit() -> None:
 
     _assert_cb_fits(CategoryCb(action="detail", category_id=category_id))
     _assert_cb_fits(UserCb(action="open", user_id=user_id))
-    _assert_cb_fits(LinkCb(action="category", category_id=category_id, chat_id=chat_id))
+    _assert_cb_fits(LinkCb(action="category", category_id=category_id))
+    _assert_cb_fits(LinkSelectCb(action="add_toggle", chat_id=chat_id, page=9))
     _assert_cb_fits(InboxCb(action="open", message_id=message_id))
     _assert_cb_fits(UserDeliveryCb(action="open", category_id=category_id))
     _assert_cb_fits(DeliveryCb(action="preset", category_id=category_id, value="daily|18-00"))
@@ -34,3 +38,5 @@ def test_callback_payload_lengths_fit_telegram_limit() -> None:
     _assert_cb_fits(AccessCb(action="user", user_id=user_id))
     _assert_cb_fits(AccessCb(action="grant", value="edit"))
     _assert_cb_fits(AccessCb(action="revoke"))
+    _assert_cb_fits(GroupCb(action="detail", chat_id=chat_id))
+    _assert_cb_fits(ReportCb(action="last", category_id=category_id, value="168"))

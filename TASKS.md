@@ -17,6 +17,7 @@
 - Fix: ACL grant/revoke callbacks укорочены (stateful user_id)
 - Fix: UI пользователей позволяет перейти к списку всех и менять роли активных
 - Tests: контроль длины callback data (64 bytes) для основных UI callbacks
+- Fix: тест callback length учитывает реальные комбинации callback data
 - Project initialization (clean architecture + docs) — структура репо и базовые спецификации
 - Telegram collector: receive messages from one group — Telethon collector выводит новые сообщения в stdout
 - Gemini filter (MVP) — сообщения проходят через Gemini и логируется решение pass/score/reason
