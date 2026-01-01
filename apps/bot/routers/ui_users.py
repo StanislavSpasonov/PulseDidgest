@@ -13,15 +13,43 @@ from apps.bot.ui.list_keyboard import build_one_column_list
 def _build_user_list(users, page: int):
     page_obj, kb = build_one_column_list(
         users,
-        label_fn=lambda user: f"{user.first_name or ''} @{user.username or 'unknown'} ({user.status})",
+        label_fn=lambda user: f"{user.first_name or ''} @{user.username or 'unknown'} ({user.status}/{user.role})",
         callback_fn=lambda user: UserCb(action="open", user_id=str(user.id)).pack(),
         page=page,
         page_size=6,
         page_callback_fn=lambda p: UserCb(action="page", page=p).pack(),
         back_cb=NavCb(action="home").pack(),
         home_cb=NavCb(action="home").pack(),
+        extra_rows=[
+            [types.InlineKeyboardButton(text="🧾 Все пользователи", callback_data=UserCb(action="all").pack())],
+        ],
     )
     return page_obj, kb
+
+
+def _build_all_user_list(users, page: int):
+    page_obj, kb = build_one_column_list(
+        users,
+        label_fn=lambda user: f"{user.first_name or ''} @{user.username or 'unknown'} ({user.status}/{user.role})",
+        callback_fn=lambda user: UserCb(action="open", user_id=str(user.id)).pack(),
+        page=page,
+        page_size=6,
+        page_callback_fn=lambda p: UserCb(action="all_page", page=p).pack(),
+        back_cb=UserCb(action="menu").pack(),
+        home_cb=NavCb(action="home").pack(),
+        extra_rows=[
+            [types.InlineKeyboardButton(text="⏳ Ожидающие", callback_data=UserCb(action="menu").pack())],
+        ],
+    )
+    return page_obj, kb
+
+
+def _build_menu_kb() -> types.InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(text="🧾 Все пользователи", callback_data=UserCb(action="all").pack())
+    builder.button(text="🏠 Домой", callback_data=NavCb(action="home").pack())
+    builder.adjust(1)
+    return builder.as_markup()
 
 
 def _build_user_actions(user_id: str) -> types.InlineKeyboardMarkup:
@@ -51,7 +79,7 @@ def build_router(deps: UiDeps) -> Router:
             return
         users = await asyncio.to_thread(deps.user_repo.list_pending_users)
         if not users:
-            await respond(callback, "Нет ожидающих пользователей.")
+            await respond(callback, "Нет ожидающих пользователей.", _build_menu_kb())
             return
         _, kb = _build_user_list(users, 0)
         await respond(callback, "Ожидают подтверждения:", kb)
@@ -67,6 +95,30 @@ def build_router(deps: UiDeps) -> Router:
             return
         _, kb = _build_user_list(users, callback_data.page)
         await respond(callback, "Ожидают подтверждения:", kb)
+
+    @router.callback_query(UserCb.filter(F.action == "all"))
+    async def handle_all(callback: types.CallbackQuery) -> None:
+        if not await _is_admin(callback.from_user.id):
+            await respond(callback, "Меню доступно только администраторам.")
+            return
+        users = await asyncio.to_thread(deps.user_repo.list_users, None)
+        if not users:
+            await respond(callback, "Пользователей нет.", _build_menu_kb())
+            return
+        _, kb = _build_all_user_list(users, 0)
+        await respond(callback, "Все пользователи:", kb)
+
+    @router.callback_query(UserCb.filter(F.action == "all_page"))
+    async def handle_all_page(callback: types.CallbackQuery, callback_data: UserCb) -> None:
+        if not await _is_admin(callback.from_user.id):
+            await respond(callback, "Меню доступно только администраторам.")
+            return
+        users = await asyncio.to_thread(deps.user_repo.list_users, None)
+        if not users:
+            await respond(callback, "Пользователей нет.", _build_menu_kb())
+            return
+        _, kb = _build_all_user_list(users, callback_data.page)
+        await respond(callback, "Все пользователи:", kb)
 
     @router.callback_query(UserCb.filter(F.action == "open"))
     async def handle_open(callback: types.CallbackQuery, callback_data: UserCb) -> None:

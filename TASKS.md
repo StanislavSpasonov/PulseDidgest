@@ -4,7 +4,6 @@
 - Multi-user support
 
 ## In Progress
-- Уточнить задачу «upgrade»: что конкретно нужно обновить?
 - Epic: Multi-user (RBAC/ACL + персональная доставка + feedback/inbox)
 
 ## Done
@@ -15,6 +14,9 @@
 - Feedback/Inbox: заявки и обратная связь + inbox для admin
 - Tests: ACL resolve, user delivery policy, status gating
 - Fix: UI Access callback data укорочены (stateful category_id)
+- Fix: ACL grant/revoke callbacks укорочены (stateful user_id)
+- Fix: UI пользователей позволяет перейти к списку всех и менять роли активных
+- Tests: контроль длины callback data (64 bytes) для основных UI callbacks
 - Project initialization (clean architecture + docs) — структура репо и базовые спецификации
 - Telegram collector: receive messages from one group — Telethon collector выводит новые сообщения в stdout
 - Gemini filter (MVP) — сообщения проходят через Gemini и логируется решение pass/score/reason
@@ -46,4 +48,4 @@
 - Epic: MVP hardening (dynamic routing, delivery outbox/scheduler, formatting, UX, tests, docs)
 
 ## Next
-- Пробежать тесты + проверить миграции/бот-флоу end-to-end
+- Проверить выдачу доступа к категориям (grant/revoke) через UI

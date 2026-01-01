@@ -14,6 +14,7 @@ from apps.bot.ui.list_keyboard import build_one_column_list
 
 class AccessState(StatesGroup):
     category_id = State()
+    user_id = State()
 
 
 def _build_categories_list(categories, page: int):
@@ -51,12 +52,12 @@ def _build_user_access_list(users, permissions: dict[str, str], owner_id: str | 
     return page_obj, kb
 
 
-def _build_access_actions(category_id: str, user_id: str, locked: bool) -> types.InlineKeyboardMarkup:
+def _build_access_actions(category_id: str, locked: bool) -> types.InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     if not locked:
-        builder.button(text="Use", callback_data=AccessCb(action="grant", category_id=category_id, user_id=user_id, value="use").pack())
-        builder.button(text="Edit", callback_data=AccessCb(action="grant", category_id=category_id, user_id=user_id, value="edit").pack())
-        builder.button(text="Revoke", callback_data=AccessCb(action="revoke", category_id=category_id, user_id=user_id).pack())
+        builder.button(text="Use", callback_data=AccessCb(action="grant", value="use").pack())
+        builder.button(text="Edit", callback_data=AccessCb(action="grant", value="edit").pack())
+        builder.button(text="Revoke", callback_data=AccessCb(action="revoke").pack())
     builder.button(text="⬅️ Назад", callback_data=AccessCb(action="category", category_id=category_id).pack())
     builder.button(text="🏠 Домой", callback_data=NavCb(action="home").pack())
     builder.adjust(1)
@@ -106,7 +107,7 @@ def build_router(deps: UiDeps) -> Router:
             return
         await state.clear()
         await state.set_state(AccessState.category_id)
-        await state.update_data(category_id=callback_data.category_id)
+        await state.update_data(category_id=callback_data.category_id, user_id=None)
         category = await asyncio.to_thread(deps.admin_repo.get_category_by_id, callback_data.category_id)
         users = await asyncio.to_thread(deps.user_repo.list_users, "active")
         entries = await asyncio.to_thread(deps.access_repo.list_acl_entries, callback_data.category_id)
@@ -151,6 +152,7 @@ def build_router(deps: UiDeps) -> Router:
         if not category_id:
             await respond(callback, "Сначала выберите категорию.")
             return
+        await state.update_data(user_id=callback_data.user_id)
         user = await asyncio.to_thread(deps.user_repo.get_by_id, callback_data.user_id)
         if not user:
             await respond(callback, "Пользователь не найден.")
@@ -163,7 +165,7 @@ def build_router(deps: UiDeps) -> Router:
         info = f"@{user.username or 'unknown'}\nrole={user.role}\naccess={permission}"
         if locked:
             info += "\n(implicit access)"
-        await respond(callback, info, _build_access_actions(category_id, callback_data.user_id, locked))
+        await respond(callback, info, _build_access_actions(category_id, locked))
 
     @router.callback_query(AccessCb.filter(F.action == "grant"))
     async def handle_grant(callback: types.CallbackQuery, callback_data: AccessCb, state: FSMContext) -> None:
@@ -175,13 +177,17 @@ def build_router(deps: UiDeps) -> Router:
             return
         data = await state.get_data()
         category_id = data.get("category_id")
+        user_id = data.get("user_id")
         if not category_id:
             await respond(callback, "Сначала выберите категорию.")
+            return
+        if not user_id:
+            await respond(callback, "Сначала выберите пользователя.")
             return
         await asyncio.to_thread(
             deps.access_repo.grant_access,
             category_id,
-            callback_data.user_id,
+            user_id,
             callback_data.value,
         )
         await respond(callback, "Доступ обновлён.")
@@ -193,13 +199,17 @@ def build_router(deps: UiDeps) -> Router:
             return
         data = await state.get_data()
         category_id = data.get("category_id")
+        user_id = data.get("user_id")
         if not category_id:
             await respond(callback, "Сначала выберите категорию.")
+            return
+        if not user_id:
+            await respond(callback, "Сначала выберите пользователя.")
             return
         await asyncio.to_thread(
             deps.access_repo.revoke_access,
             category_id,
-            callback_data.user_id,
+            user_id,
         )
         await respond(callback, "Доступ отозван.")
 
