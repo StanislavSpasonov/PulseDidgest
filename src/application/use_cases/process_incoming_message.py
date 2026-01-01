@@ -11,6 +11,7 @@ from src.application.use_cases.filter_message_with_gemini import (
     FilterMessageWithGeminiUseCase,
 )
 from src.application.use_cases.deliver_decision import DeliverDecisionUseCase
+from src.application.services.delivery_policy import resolve_delivery_policy
 from src.application.use_cases.routing_snapshot import RoutingSnapshot
 from src.application.use_cases.store_message_and_decision import (
     StoreMessageAndDecisionUseCase,
@@ -167,6 +168,30 @@ class ProcessIncomingMessageUseCase:
                         message.message_id,
                     )
                 elif self._instant_delivery or self._outbox:
+                    policy = resolve_delivery_policy(route)
+                    if not policy.enabled:
+                        continue
+                    if policy.mode == "instant" and self._instant_delivery:
+                        await self._instant_delivery.deliver(
+                            decision_db_id,
+                            decision_record,
+                            route.category_name,
+                            message.text,
+                            message.chat_id,
+                            message.message_id,
+                            route.group_title,
+                            route.group_username,
+                        )
+                    elif policy.mode == "digest" and self._outbox:
+                        self._outbox.enqueue(
+                            decision_record,
+                            message.text,
+                            route,
+                            policy,
+                            decision_db_id,
+                            message.message_id,
+                        )
+                else:
                     self._logger.warning(
                         "Delivery use case missing; instant=%s outbox=%s",
                         bool(self._instant_delivery),
