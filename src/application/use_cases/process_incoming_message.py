@@ -10,8 +10,7 @@ from src.application.services.prefilter import should_run_llm
 from src.application.use_cases.filter_message_with_gemini import (
     FilterMessageWithGeminiUseCase,
 )
-from src.application.services.delivery_policy import resolve_delivery_policy
-from src.application.use_cases.delivery_outbox import EnqueueDeliveryOutboxUseCase
+from src.application.use_cases.deliver_decision import DeliverDecisionUseCase
 from src.application.use_cases.routing_snapshot import RoutingSnapshot
 from src.application.use_cases.store_message_and_decision import (
     StoreMessageAndDecisionUseCase,
@@ -52,6 +51,7 @@ class ProcessIncomingMessageUseCase:
         logger: logging.Logger | None = None,
         instant_delivery_use_case=None,
         outbox_use_case: EnqueueDeliveryOutboxUseCase | None = None,
+        deliver_decision_use_case: DeliverDecisionUseCase | None = None,
         notifier: AdminNotifier | None = None,
         debug_throttle=None,
         cooldown: CooldownProtocol | None = None,
@@ -60,6 +60,7 @@ class ProcessIncomingMessageUseCase:
         self._store = store_use_case
         self._instant_delivery = instant_delivery_use_case
         self._outbox = outbox_use_case
+        self._deliver_decision = deliver_decision_use_case
         self._notifier = notifier
         self._debug_throttle = debug_throttle
         self._cooldown = cooldown
@@ -157,47 +158,19 @@ class ProcessIncomingMessageUseCase:
             _, decision_db_id = saved
 
             if decision_record.passed:
-                policy = resolve_delivery_policy(route)
-                self._logger.info(
-                    "Delivery policy category=%s chat_id=%s enabled=%s mode=%s schedule=%s source=%s",
-                    route.category_name,
-                    route.chat_id,
-                    policy.enabled,
-                    policy.mode,
-                    policy.schedule,
-                    policy.source,
-                )
-                if not policy.enabled:
-                    continue
-                if policy.mode == "instant" and self._instant_delivery:
-                    await self._instant_delivery.deliver(
+                if self._deliver_decision:
+                    await self._deliver_decision.deliver(
                         decision_db_id,
                         decision_record,
-                        route.category_name,
-                        message.text,
-                        message.chat_id,
-                        message.message_id,
-                        route.group_title,
-                        route.group_username,
-                    )
-                    self._logger.info(
-                        "Delivery action=sent mode=instant category=%s chat_id=%s",
-                        route.category_name,
-                        route.chat_id,
-                    )
-                elif policy.mode == "digest" and self._outbox:
-                    self._outbox.enqueue(
-                        decision_record,
-                        message.text,
                         route,
-                        policy,
-                        decision_db_id,
+                        message.text,
                         message.message_id,
                     )
-                    self._logger.info(
-                        "Delivery action=enqueued mode=digest category=%s chat_id=%s",
-                        route.category_name,
-                        route.chat_id,
+                elif self._instant_delivery or self._outbox:
+                    self._logger.warning(
+                        "Delivery use case missing; instant=%s outbox=%s",
+                        bool(self._instant_delivery),
+                        bool(self._outbox),
                     )
 
             if self._notifier and route.debug_enabled and self._debug_throttle:

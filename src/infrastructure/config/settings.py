@@ -59,6 +59,8 @@ def load_collector_settings() -> CollectorSettings:
     cooldown_seconds = _get_int_env("GEMINI_COOLDOWN_SECONDS", 60, min_value=0)
     bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
     admin_user_id = _get_optional_int_env("TELEGRAM_ADMIN_USER_ID")
+    if admin_user_id is None:
+        admin_user_id = _get_optional_int_env("ADMIN_TELEGRAM_ID")
     default_tz = os.getenv("DEFAULT_TZ", "Europe/Berlin")
     config_mode = os.getenv("CONFIG_SYNC_MODE", "seed_if_empty")
     delivery_tick_seconds = _get_int_env("DELIVERY_TICK_SECONDS", 60, min_value=15)
@@ -84,7 +86,10 @@ def load_collector_settings() -> CollectorSettings:
 
 def load_bot_settings() -> BotSettings:
     token = _require_env("TELEGRAM_BOT_TOKEN")
-    admin_user_id = _get_int_env("TELEGRAM_ADMIN_USER_ID", 0, min_value=0)
+    admin_user_id = _get_optional_int_env("TELEGRAM_ADMIN_USER_ID")
+    if admin_user_id is None:
+        admin_user_id = _get_optional_int_env("ADMIN_TELEGRAM_ID")
+    admin_user_id = admin_user_id or 0
     default_tz = os.getenv("DEFAULT_TZ", "Europe/Berlin")
     telethon_api_id = _get_int_env("TELEGRAM_API_ID", 0, min_value=0)
     telethon_api_hash = os.getenv("TELEGRAM_API_HASH")

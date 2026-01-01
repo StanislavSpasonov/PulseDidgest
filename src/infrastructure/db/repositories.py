@@ -12,22 +12,30 @@ from src.domain.entities import (
     CategoryGroupBinding,
     DigestGroupInfo,
     DeliveryOutboxItem,
+    CategoryAclEntry,
     PendingDecisionInfo,
     PrefilterRule,
     RuntimeCategoryGroup,
     DecisionRecord,
     MessageRecord,
     UserRecord,
+    UserCategoryDelivery,
+    UserCategoryChatOverride,
+    FeedbackMessageRecord,
 )
 
 from .models import (
     CategoryGroupModel,
     CategoryModel,
+    CategoryAclModel,
     DecisionModel,
     DeliveryOutboxModel,
     LLMErrorModel,
     MessageModel,
     SourceGroupModel,
+    UserCategoryDeliveryModel,
+    UserCategoryChatDeliveryOverrideModel,
+    FeedbackMessageModel,
     UserModel,
 )
 
@@ -641,47 +649,545 @@ class SQLAlchemyUserRepository:
     def __init__(self, session_factory: Callable[[], Session]) -> None:
         self._session_factory = session_factory
 
-    def register_user(self, tg_user_id: int, chat_id: int, username: str | None) -> str:
+    def upsert_user(
+        self,
+        telegram_user_id: int,
+        chat_id: int,
+        username: str | None,
+        first_name: str | None,
+        bootstrap_admin_id: int | None = None,
+    ) -> UserRecord:
         session = self._session_factory()
         try:
-            stmt = select(UserModel).where(UserModel.tg_user_id == tg_user_id)
+            stmt = select(UserModel).where(
+                UserModel.telegram_user_id == telegram_user_id
+            )
             user = session.execute(stmt).scalar_one_or_none()
+            now = datetime.utcnow()
+            is_bootstrap_admin = bool(
+                bootstrap_admin_id and telegram_user_id == bootstrap_admin_id
+            )
             if user is None:
+                role = "admin" if is_bootstrap_admin else "user"
+                status = "active" if is_bootstrap_admin else "pending"
                 user = UserModel(
-                    tg_user_id=tg_user_id,
+                    telegram_user_id=telegram_user_id,
                     chat_id=chat_id,
                     username=username,
-                    is_active=True,
+                    first_name=first_name,
+                    role=role,
+                    status=status,
+                    is_active=(status == "active"),
+                    last_seen_at=now,
                 )
                 session.add(user)
             else:
                 user.chat_id = chat_id
                 user.username = username
-                user.is_active = True
+                user.first_name = first_name
+                user.last_seen_at = now
+                if is_bootstrap_admin:
+                    user.role = "admin"
+                    user.status = "active"
+                    user.is_active = True
+                else:
+                    user.is_active = user.status == "active"
             session.commit()
-            return str(user.id)
+            return self._to_record(user)
         except Exception:
             session.rollback()
             raise
         finally:
             session.close()
 
+    def get_by_telegram_id(self, telegram_user_id: int) -> UserRecord | None:
+        session = self._session_factory()
+        try:
+            stmt = select(UserModel).where(
+                UserModel.telegram_user_id == telegram_user_id
+            )
+            user = session.execute(stmt).scalar_one_or_none()
+            return self._to_record(user) if user else None
+        finally:
+            session.close()
+
+    def get_by_id(self, user_id: str) -> UserRecord | None:
+        session = self._session_factory()
+        try:
+            stmt = select(UserModel).where(UserModel.id == uuid.UUID(user_id))
+            user = session.execute(stmt).scalar_one_or_none()
+            return self._to_record(user) if user else None
+        finally:
+            session.close()
+
     def get_active_users(self) -> List[UserRecord]:
         session = self._session_factory()
         try:
-            stmt = select(UserModel).where(UserModel.is_active.is_(True))
+            stmt = select(UserModel).where(UserModel.status == "active")
+            users = session.execute(stmt).scalars().all()
+            return [self._to_record(user) for user in users]
+        finally:
+            session.close()
+
+    def list_pending_users(self) -> List[UserRecord]:
+        session = self._session_factory()
+        try:
+            stmt = select(UserModel).where(UserModel.status == "pending")
+            users = session.execute(stmt).scalars().all()
+            return [self._to_record(user) for user in users]
+        finally:
+            session.close()
+
+    def list_users(self, status: str | None = None) -> List[UserRecord]:
+        session = self._session_factory()
+        try:
+            stmt = select(UserModel)
+            if status:
+                stmt = stmt.where(UserModel.status == status)
+            stmt = stmt.order_by(UserModel.created_at.asc())
+            users = session.execute(stmt).scalars().all()
+            return [self._to_record(user) for user in users]
+        finally:
+            session.close()
+
+    def set_status(self, user_id: str, status: str) -> None:
+        session = self._session_factory()
+        try:
+            stmt = select(UserModel).where(UserModel.id == uuid.UUID(user_id))
+            user = session.execute(stmt).scalar_one_or_none()
+            if user is None:
+                return
+            user.status = status
+            user.is_active = status == "active"
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def set_role(self, user_id: str, role: str) -> None:
+        session = self._session_factory()
+        try:
+            stmt = select(UserModel).where(UserModel.id == uuid.UUID(user_id))
+            user = session.execute(stmt).scalar_one_or_none()
+            if user is None:
+                return
+            user.role = role
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def _to_record(self, user: UserModel) -> UserRecord:
+        return UserRecord(
+            id=str(user.id),
+            telegram_user_id=int(user.telegram_user_id),
+            chat_id=int(user.chat_id),
+            username=user.username,
+            first_name=user.first_name,
+            role=user.role,
+            status=user.status,
+            created_at=user.created_at,
+            updated_at=user.updated_at,
+            last_seen_at=user.last_seen_at,
+        )
+
+
+class SQLAlchemyCategoryAccessRepository:
+    """Manages category ownership and ACL rules."""
+
+    def __init__(self, session_factory: Callable[[], Session]) -> None:
+        self._session_factory = session_factory
+
+    def list_acl_entries(self, category_id: str) -> List[CategoryAclEntry]:
+        session = self._session_factory()
+        try:
+            stmt = select(CategoryAclModel).where(
+                CategoryAclModel.category_id == uuid.UUID(category_id)
+            )
+            rows = session.execute(stmt).scalars().all()
+            return [
+                CategoryAclEntry(
+                    category_id=str(row.category_id),
+                    user_id=str(row.user_id),
+                    permission=row.permission,
+                )
+                for row in rows
+            ]
+        finally:
+            session.close()
+
+    def get_user_permission(self, category_id: str, user_id: str) -> str | None:
+        session = self._session_factory()
+        try:
+            stmt = select(CategoryAclModel).where(
+                CategoryAclModel.category_id == uuid.UUID(category_id),
+                CategoryAclModel.user_id == uuid.UUID(user_id),
+            )
+            row = session.execute(stmt).scalar_one_or_none()
+            return row.permission if row else None
+        finally:
+            session.close()
+
+    def grant_access(self, category_id: str, user_id: str, permission: str) -> None:
+        session = self._session_factory()
+        try:
+            stmt = select(CategoryAclModel).where(
+                CategoryAclModel.category_id == uuid.UUID(category_id),
+                CategoryAclModel.user_id == uuid.UUID(user_id),
+            )
+            entry = session.execute(stmt).scalar_one_or_none()
+            if entry is None:
+                entry = CategoryAclModel(
+                    category_id=uuid.UUID(category_id),
+                    user_id=uuid.UUID(user_id),
+                    permission=permission,
+                )
+                session.add(entry)
+            else:
+                entry.permission = permission
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def revoke_access(self, category_id: str, user_id: str) -> None:
+        session = self._session_factory()
+        try:
+            stmt = select(CategoryAclModel).where(
+                CategoryAclModel.category_id == uuid.UUID(category_id),
+                CategoryAclModel.user_id == uuid.UUID(user_id),
+            )
+            entry = session.execute(stmt).scalar_one_or_none()
+            if entry is None:
+                return
+            session.delete(entry)
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def list_active_users_for_category(self, category_id: str) -> List[UserRecord]:
+        session = self._session_factory()
+        try:
+            category = session.execute(
+                select(CategoryModel).where(CategoryModel.id == uuid.UUID(category_id))
+            ).scalar_one_or_none()
+            owner_id = category.owner_user_id if category else None
+            acl_subquery = select(CategoryAclModel.user_id).where(
+                CategoryAclModel.category_id == uuid.UUID(category_id)
+            )
+            stmt = (
+                select(UserModel)
+                .where(UserModel.status == "active")
+                .where(
+                    (UserModel.role == "admin")
+                    | (UserModel.id == owner_id)
+                    | (UserModel.id.in_(acl_subquery))
+                )
+            )
             users = session.execute(stmt).scalars().all()
             return [
                 UserRecord(
                     id=str(user.id),
-                    tg_user_id=int(user.tg_user_id),
+                    telegram_user_id=int(user.telegram_user_id),
                     chat_id=int(user.chat_id),
                     username=user.username,
-                    is_active=user.is_active,
+                    first_name=user.first_name,
+                    role=user.role,
+                    status=user.status,
                     created_at=user.created_at,
+                    updated_at=user.updated_at,
+                    last_seen_at=user.last_seen_at,
                 )
                 for user in users
             ]
+        finally:
+            session.close()
+
+    def list_categories_for_user(self, user_id: str) -> List[CategoryModel]:
+        session = self._session_factory()
+        try:
+            acl_subquery = select(CategoryAclModel.category_id).where(
+                CategoryAclModel.user_id == uuid.UUID(user_id)
+            )
+            stmt = (
+                select(CategoryModel)
+                .where(CategoryModel.is_enabled.is_(True))
+                .where(
+                    (CategoryModel.owner_user_id == uuid.UUID(user_id))
+                    | (CategoryModel.id.in_(acl_subquery))
+                )
+                .order_by(CategoryModel.name.asc())
+            )
+            return session.execute(stmt).scalars().all()
+        finally:
+            session.close()
+
+    def list_editable_categories_for_user(self, user_id: str) -> List[CategoryModel]:
+        session = self._session_factory()
+        try:
+            acl_subquery = select(CategoryAclModel.category_id).where(
+                CategoryAclModel.user_id == uuid.UUID(user_id),
+                CategoryAclModel.permission == "edit",
+            )
+            stmt = (
+                select(CategoryModel)
+                .where(CategoryModel.is_enabled.is_(True))
+                .where(
+                    (CategoryModel.owner_user_id == uuid.UUID(user_id))
+                    | (CategoryModel.id.in_(acl_subquery))
+                )
+                .order_by(CategoryModel.name.asc())
+            )
+            return session.execute(stmt).scalars().all()
+        finally:
+            session.close()
+
+
+class SQLAlchemyUserDeliveryRepository:
+    """Manages per-user delivery preferences."""
+
+    def __init__(self, session_factory: Callable[[], Session]) -> None:
+        self._session_factory = session_factory
+
+    def get_user_category_delivery(
+        self, user_id: str, category_id: str
+    ) -> UserCategoryDelivery | None:
+        session = self._session_factory()
+        try:
+            stmt = select(UserCategoryDeliveryModel).where(
+                UserCategoryDeliveryModel.user_id == uuid.UUID(user_id),
+                UserCategoryDeliveryModel.category_id == uuid.UUID(category_id),
+            )
+            row = session.execute(stmt).scalar_one_or_none()
+            if row is None:
+                return None
+            return UserCategoryDelivery(
+                user_id=str(row.user_id),
+                category_id=str(row.category_id),
+                enabled=row.enabled,
+                mode=row.mode,
+                digest_kind=row.digest_kind,
+                interval_minutes=row.interval_minutes,
+                daily_time_hhmm=row.daily_time_hhmm,
+                timezone=row.timezone,
+                last_sent_at=row.last_sent_at,
+            )
+        finally:
+            session.close()
+
+    def upsert_user_category_delivery(
+        self,
+        user_id: str,
+        category_id: str,
+        enabled: bool,
+        mode: str,
+        digest_kind: str | None,
+        interval_minutes: int | None,
+        daily_time_hhmm: str | None,
+        timezone: str,
+    ) -> None:
+        session = self._session_factory()
+        try:
+            stmt = select(UserCategoryDeliveryModel).where(
+                UserCategoryDeliveryModel.user_id == uuid.UUID(user_id),
+                UserCategoryDeliveryModel.category_id == uuid.UUID(category_id),
+            )
+            row = session.execute(stmt).scalar_one_or_none()
+            if row is None:
+                row = UserCategoryDeliveryModel(
+                    user_id=uuid.UUID(user_id),
+                    category_id=uuid.UUID(category_id),
+                )
+                session.add(row)
+            row.enabled = enabled
+            row.mode = mode
+            row.digest_kind = digest_kind
+            row.interval_minutes = interval_minutes
+            row.daily_time_hhmm = daily_time_hhmm
+            row.timezone = timezone
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def get_chat_override(
+        self, user_id: str, category_id: str, chat_id: int
+    ) -> UserCategoryChatOverride | None:
+        session = self._session_factory()
+        try:
+            stmt = select(UserCategoryChatDeliveryOverrideModel).where(
+                UserCategoryChatDeliveryOverrideModel.user_id == uuid.UUID(user_id),
+                UserCategoryChatDeliveryOverrideModel.category_id == uuid.UUID(category_id),
+                UserCategoryChatDeliveryOverrideModel.chat_id == chat_id,
+            )
+            row = session.execute(stmt).scalar_one_or_none()
+            if row is None:
+                return None
+            return UserCategoryChatOverride(
+                user_id=str(row.user_id),
+                category_id=str(row.category_id),
+                chat_id=int(row.chat_id),
+                enabled=row.enabled,
+                mode=row.mode,
+                digest_kind=row.digest_kind,
+                interval_minutes=row.interval_minutes,
+                daily_time_hhmm=row.daily_time_hhmm,
+                timezone=row.timezone,
+                last_sent_at=row.last_sent_at,
+            )
+        finally:
+            session.close()
+
+    def upsert_chat_override(
+        self,
+        user_id: str,
+        category_id: str,
+        chat_id: int,
+        enabled: bool | None,
+        mode: str | None,
+        digest_kind: str | None,
+        interval_minutes: int | None,
+        daily_time_hhmm: str | None,
+        timezone: str | None,
+    ) -> None:
+        session = self._session_factory()
+        try:
+            stmt = select(UserCategoryChatDeliveryOverrideModel).where(
+                UserCategoryChatDeliveryOverrideModel.user_id == uuid.UUID(user_id),
+                UserCategoryChatDeliveryOverrideModel.category_id == uuid.UUID(category_id),
+                UserCategoryChatDeliveryOverrideModel.chat_id == chat_id,
+            )
+            row = session.execute(stmt).scalar_one_or_none()
+            if row is None:
+                row = UserCategoryChatDeliveryOverrideModel(
+                    user_id=uuid.UUID(user_id),
+                    category_id=uuid.UUID(category_id),
+                    chat_id=chat_id,
+                )
+                session.add(row)
+            row.enabled = enabled
+            row.mode = mode
+            row.digest_kind = digest_kind
+            row.interval_minutes = interval_minutes
+            row.daily_time_hhmm = daily_time_hhmm
+            row.timezone = timezone
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def update_last_sent(
+        self,
+        user_id: str,
+        category_id: str,
+        chat_id: int | None,
+        timestamp: datetime,
+    ) -> bool:
+        session = self._session_factory()
+        try:
+            if chat_id is None:
+                stmt = select(UserCategoryDeliveryModel).where(
+                    UserCategoryDeliveryModel.user_id == uuid.UUID(user_id),
+                    UserCategoryDeliveryModel.category_id == uuid.UUID(category_id),
+                )
+                row = session.execute(stmt).scalar_one_or_none()
+                if row is None:
+                    return False
+                row.last_sent_at = timestamp
+            else:
+                stmt = select(UserCategoryChatDeliveryOverrideModel).where(
+                    UserCategoryChatDeliveryOverrideModel.user_id == uuid.UUID(user_id),
+                    UserCategoryChatDeliveryOverrideModel.category_id == uuid.UUID(category_id),
+                    UserCategoryChatDeliveryOverrideModel.chat_id == chat_id,
+                )
+                row = session.execute(stmt).scalar_one_or_none()
+                if row is None:
+                    return False
+                row.last_sent_at = timestamp
+            session.commit()
+            return True
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+
+class SQLAlchemyFeedbackRepository:
+    """Stores feedback and access requests."""
+
+    def __init__(self, session_factory: Callable[[], Session]) -> None:
+        self._session_factory = session_factory
+
+    def create(self, record: FeedbackMessageRecord) -> str:
+        session = self._session_factory()
+        try:
+            model = FeedbackMessageModel(
+                id=uuid.UUID(record.id) if record.id else uuid.uuid4(),
+                user_id=uuid.UUID(record.user_id),
+                type=record.type,
+                text=record.text,
+                status=record.status,
+            )
+            session.add(model)
+            session.commit()
+            return str(model.id)
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
+
+    def list_messages(self, status: str | None = None) -> List[FeedbackMessageRecord]:
+        session = self._session_factory()
+        try:
+            stmt = select(FeedbackMessageModel)
+            if status:
+                stmt = stmt.where(FeedbackMessageModel.status == status)
+            stmt = stmt.order_by(FeedbackMessageModel.created_at.desc())
+            rows = session.execute(stmt).scalars().all()
+            return [
+                FeedbackMessageRecord(
+                    id=str(row.id),
+                    user_id=str(row.user_id),
+                    type=row.type,
+                    text=row.text,
+                    status=row.status,
+                    created_at=row.created_at,
+                )
+                for row in rows
+            ]
+        finally:
+            session.close()
+
+    def mark_done(self, message_id: str) -> None:
+        session = self._session_factory()
+        try:
+            row = session.execute(
+                select(FeedbackMessageModel).where(
+                    FeedbackMessageModel.id == uuid.UUID(message_id)
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                return
+            row.status = "done"
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
         finally:
             session.close()
 
@@ -730,7 +1236,7 @@ class SQLAlchemyAdminRepository:
         finally:
             session.close()
 
-    def create_category(self, name: str) -> None:
+    def create_category(self, name: str, owner_user_id: str | None = None) -> None:
         session = self._session_factory()
         try:
             existing = session.execute(
@@ -738,7 +1244,10 @@ class SQLAlchemyAdminRepository:
             ).scalar_one_or_none()
             if existing:
                 raise ValueError("Category already exists")
-            session.add(CategoryModel(name=name, prompt=""))
+            category = CategoryModel(name=name, prompt="")
+            if owner_user_id:
+                category.owner_user_id = uuid.UUID(owner_user_id)
+            session.add(category)
             session.commit()
         except Exception:
             session.rollback()

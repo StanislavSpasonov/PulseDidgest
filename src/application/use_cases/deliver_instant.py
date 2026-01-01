@@ -39,6 +39,8 @@ class DeliverInstantUseCase:
         message_id: int,
         group_title: str | None = None,
         username: str | None = None,
+        recipient_chat_id: int | None = None,
+        mark_delivered: bool = True,
     ) -> None:
         payload = format_instant_message_html(
             category_name=category_name,
@@ -52,13 +54,21 @@ class DeliverInstantUseCase:
         reply_markup = (
             self._reply_markup_factory() if self._reply_markup_factory else None
         )
-        delivered = await self._notifier.broadcast(
-            payload,
-            parse_mode="HTML",
-            reply_markup=reply_markup,
-        )
+        if recipient_chat_id is None:
+            delivered = await self._notifier.broadcast(
+                payload,
+                parse_mode="HTML",
+                reply_markup=reply_markup,
+            )
+        else:
+            delivered = await self._notifier.send_to_chat(
+                recipient_chat_id,
+                payload,
+                parse_mode="HTML",
+                reply_markup=reply_markup,
+            )
 
-        if delivered:
+        if delivered and mark_delivered:
             await asyncio.to_thread(
                 self._decision_repository.mark_decision_delivered,
                 decision_id,

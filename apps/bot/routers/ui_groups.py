@@ -9,7 +9,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from apps.bot.ui.callbacks import GroupCb, LinkCb, NavCb
-from apps.bot.ui.common import UiDeps, format_chat_line, is_admin, respond
+from apps.bot.ui.common import UiDeps, fetch_user, format_chat_line, is_admin, is_power, respond
 from apps.bot.ui.list_keyboard import build_one_column_list
 
 
@@ -128,9 +128,14 @@ def _build_group_detail_kb(chat_id: int) -> types.InlineKeyboardMarkup:
 def build_router(deps: UiDeps) -> Router:
     router = Router()
 
+    async def _is_admin_or_power(user_id: int | None) -> bool:
+        user = await fetch_user(deps, user_id)
+        return bool(user and (is_admin(user, deps.admin_user_id) or is_power(user, deps.admin_user_id)))
+
+
     @router.callback_query(GroupCb.filter(F.action == "menu"))
     async def handle_menu(callback: types.CallbackQuery, state: FSMContext) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin_or_power(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         await state.clear()
@@ -138,7 +143,7 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(GroupCb.filter(F.action == "my"))
     async def handle_my_chats(callback: types.CallbackQuery, callback_data: GroupCb) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin_or_power(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         try:
@@ -161,7 +166,7 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(GroupCb.filter(F.action == "registered"))
     async def handle_registered(callback: types.CallbackQuery, callback_data: GroupCb) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin_or_power(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         groups = await asyncio.to_thread(deps.admin_repo.list_groups)
@@ -170,7 +175,7 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(GroupCb.filter(F.action == "search"))
     async def handle_search(callback: types.CallbackQuery, state: FSMContext) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin_or_power(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         await state.set_state(GroupSearchState.query)
@@ -182,7 +187,7 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.message(GroupSearchState.query)
     async def handle_search_query(message: types.Message, state: FSMContext) -> None:
-        if not is_admin(message.from_user.id if message.from_user else None, deps.admin_user_id):
+        if not await _is_admin_or_power(message.from_user.id if message.from_user else None):
             await message.answer("Меню доступно только администраторам.")
             await state.clear()
             return
@@ -215,7 +220,7 @@ def build_router(deps: UiDeps) -> Router:
     async def handle_search_page(
         callback: types.CallbackQuery, callback_data: GroupCb, state: FSMContext
     ) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin_or_power(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         data = await state.get_data()
@@ -242,7 +247,7 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(GroupCb.filter(F.action == "add"))
     async def handle_add(callback: types.CallbackQuery, callback_data: GroupCb) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin_or_power(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         try:
@@ -266,7 +271,14 @@ def build_router(deps: UiDeps) -> Router:
         except Exception as exc:
             await respond(callback, f"Не удалось добавить группу: {exc}")
             return
-        categories = await asyncio.to_thread(deps.admin_repo.list_categories)
+        user = await fetch_user(deps, callback.from_user.id)
+        if user and not is_admin(user, deps.admin_user_id):
+            categories = await asyncio.to_thread(
+                deps.access_repo.list_editable_categories_for_user,
+                user.id,
+            )
+        else:
+            categories = await asyncio.to_thread(deps.admin_repo.list_categories)
         text = (
             "Группа добавлена.\n"
             f"{format_chat_line(chat)}\n\n"
@@ -278,13 +290,24 @@ def build_router(deps: UiDeps) -> Router:
     async def handle_bind_from_group(
         callback: types.CallbackQuery, callback_data: LinkCb
     ) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin_or_power(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         try:
             category = await asyncio.to_thread(
                 deps.admin_repo.get_category_by_id, callback_data.category_id
             )
+            user = await fetch_user(deps, callback.from_user.id)
+            if user and not is_admin(user, deps.admin_user_id):
+                permission = await asyncio.to_thread(
+                    deps.access_repo.get_user_permission,
+                    callback_data.category_id,
+                    user.id,
+                )
+                is_owner = bool(category.owner_user_id and str(category.owner_user_id) == user.id)
+                if not (is_owner or permission == "edit"):
+                    await respond(callback, "Нет доступа к категории.")
+                    return
             await asyncio.to_thread(
                 deps.admin_repo.bind_category,
                 category.name,
@@ -305,7 +328,7 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(GroupCb.filter(F.action == "detail"))
     async def handle_detail(callback: types.CallbackQuery, callback_data: GroupCb) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin_or_power(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         group = None
@@ -335,10 +358,17 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(GroupCb.filter(F.action == "bind_pick"))
     async def handle_bind_pick(callback: types.CallbackQuery, callback_data: GroupCb) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin_or_power(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
-        categories = await asyncio.to_thread(deps.admin_repo.list_categories)
+        user = await fetch_user(deps, callback.from_user.id)
+        if user and not is_admin(user, deps.admin_user_id):
+            categories = await asyncio.to_thread(
+                deps.access_repo.list_editable_categories_for_user,
+                user.id,
+            )
+        else:
+            categories = await asyncio.to_thread(deps.admin_repo.list_categories)
         if not categories:
             await respond(callback, "Сначала создайте категорию.", _build_groups_menu())
             return
@@ -350,7 +380,7 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(GroupCb.filter(F.action == "delete_confirm"))
     async def handle_delete_confirm(callback: types.CallbackQuery, callback_data: GroupCb) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin_or_power(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         builder = InlineKeyboardBuilder()
@@ -365,7 +395,7 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(GroupCb.filter(F.action == "delete_yes"))
     async def handle_delete_yes(callback: types.CallbackQuery, callback_data: GroupCb) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin_or_power(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         try:

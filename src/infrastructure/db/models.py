@@ -54,6 +54,11 @@ class CategoryModel(Base):
     __tablename__ = "categories"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     name = Column(Text, nullable=False, unique=True)
     prompt = Column(Text, nullable=False)
     is_enabled = Column(Boolean, nullable=False, server_default="true")
@@ -140,11 +145,21 @@ class UserModel(Base):
     __tablename__ = "users"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tg_user_id = Column(BigInteger, nullable=False, unique=True)
+    telegram_user_id = Column(BigInteger, nullable=False, unique=True)
     chat_id = Column(BigInteger, nullable=False, unique=True)
     username = Column(Text, nullable=True)
+    first_name = Column(Text, nullable=True)
+    role = Column(Text, nullable=False, server_default="user")
+    status = Column(Text, nullable=False, server_default="pending")
     is_active = Column(Boolean, nullable=False, server_default="true")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+    last_seen_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class DecisionModel(Base):
@@ -202,3 +217,108 @@ class DeliveryOutboxModel(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     sent_at = Column(DateTime(timezone=True), nullable=True)
     last_error = Column(Text, nullable=True)
+
+
+class CategoryAclModel(Base):
+    __tablename__ = "category_acl"
+    __table_args__ = (
+        UniqueConstraint("category_id", "user_id", name="uq_category_acl"),
+    )
+
+    category_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("categories.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    permission = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class UserCategoryDeliveryModel(Base):
+    __tablename__ = "user_category_delivery"
+    __table_args__ = (
+        UniqueConstraint("user_id", "category_id", name="uq_user_category_delivery"),
+    )
+
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    category_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("categories.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    enabled = Column(Boolean, nullable=False, server_default="false")
+    mode = Column(Text, nullable=False, server_default="instant")
+    digest_kind = Column(Text, nullable=True)
+    interval_minutes = Column(Integer, nullable=True)
+    daily_time_hhmm = Column(Text, nullable=True)
+    timezone = Column(Text, nullable=False, server_default="Europe/Berlin")
+    last_sent_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class UserCategoryChatDeliveryOverrideModel(Base):
+    __tablename__ = "user_category_chat_delivery_override"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "category_id",
+            "chat_id",
+            name="uq_user_category_chat_override",
+        ),
+    )
+
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    category_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("categories.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    chat_id = Column(BigInteger, primary_key=True)
+    enabled = Column(Boolean, nullable=True)
+    mode = Column(Text, nullable=True)
+    digest_kind = Column(Text, nullable=True)
+    interval_minutes = Column(Integer, nullable=True)
+    daily_time_hhmm = Column(Text, nullable=True)
+    timezone = Column(Text, nullable=True)
+    last_sent_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class FeedbackMessageModel(Base):
+    __tablename__ = "feedback_messages"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    type = Column(Text, nullable=False)
+    text = Column(Text, nullable=False)
+    status = Column(Text, nullable=False, server_default="new")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

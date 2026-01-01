@@ -67,6 +67,24 @@ class UserNotifier:
                 )
         return delivered
 
+    async def send_to_chat(
+        self,
+        chat_id: int,
+        text: str,
+        parse_mode: str | None = None,
+        reply_markup=None,
+    ) -> bool:
+        try:
+            await self._sender.send_message(
+                chat_id,
+                text,
+                parse_mode=parse_mode,
+                reply_markup=reply_markup,
+            )
+            return True
+        except Exception as exc:  # pragma: no cover
+            self._logger.warning("Failed to send message to chat_id=%s: %s", chat_id, exc)
+            return False
     async def notify_admin(
         self,
         text: str,

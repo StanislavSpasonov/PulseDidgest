@@ -4,7 +4,7 @@ from aiogram import F, Router, types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from apps.bot.ui.callbacks import NavCb, SettingsCb
-from apps.bot.ui.common import UiDeps, is_admin, respond
+from apps.bot.ui.common import UiDeps, fetch_user, is_admin, respond
 
 
 def _build_settings_text(settings: dict[str, str]) -> str:
@@ -23,9 +23,13 @@ def _build_settings_kb() -> types.InlineKeyboardMarkup:
 def build_router(deps: UiDeps) -> Router:
     router = Router()
 
+    async def _is_admin(user_id: int | None) -> bool:
+        user = await fetch_user(deps, user_id)
+        return is_admin(user, deps.admin_user_id)
+
     @router.callback_query(SettingsCb.filter(F.action == "menu"))
     async def handle_menu(callback: types.CallbackQuery) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         text = _build_settings_text(deps.settings_snapshot)

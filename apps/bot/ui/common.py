@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Iterable, Optional
@@ -10,9 +11,13 @@ from src.application.use_cases.manage_groups_telethon import (
     ListUserChatsUseCase,
     SearchUserChatsUseCase,
 )
+from src.domain.entities import UserRecord
 from src.infrastructure.db.repositories import (
     SQLAlchemyAdminRepository,
+    SQLAlchemyCategoryAccessRepository,
     SQLAlchemyDeliveryRepository,
+    SQLAlchemyFeedbackRepository,
+    SQLAlchemyUserDeliveryRepository,
     SQLAlchemyUserRepository,
 )
 
@@ -22,8 +27,11 @@ class UiDeps:
     admin_user_id: int
     default_tz: str
     admin_repo: SQLAlchemyAdminRepository
+    access_repo: SQLAlchemyCategoryAccessRepository
     user_repo: SQLAlchemyUserRepository
     delivery_repo: SQLAlchemyDeliveryRepository
+    user_delivery_repo: SQLAlchemyUserDeliveryRepository
+    feedback_repo: SQLAlchemyFeedbackRepository
     list_chats_use_case: ListUserChatsUseCase
     search_chats_use_case: SearchUserChatsUseCase
     add_group_use_case: AddGroupByNameUseCase
@@ -32,8 +40,44 @@ class UiDeps:
     logger: logging.Logger
 
 
-def is_admin(user_id: Optional[int], admin_user_id: int) -> bool:
-    return bool(user_id and admin_user_id and user_id == admin_user_id)
+async def fetch_user(
+    deps: UiDeps,
+    telegram_user_id: int | None,
+) -> UserRecord | None:
+    if not telegram_user_id:
+        return None
+    return await asyncio.to_thread(
+        deps.user_repo.get_by_telegram_id,
+        telegram_user_id,
+    )
+
+
+def is_admin(user: UserRecord | None, admin_user_id: int) -> bool:
+    if not user or user.status != "active":
+        return False
+    if user.role == "admin":
+        return True
+    return bool(admin_user_id and user.telegram_user_id == admin_user_id)
+
+
+def is_power(user: UserRecord | None, admin_user_id: int) -> bool:
+    if not user or user.status != "active":
+        return False
+    return user.role in {"power", "admin"} or bool(
+        admin_user_id and user.telegram_user_id == admin_user_id
+    )
+
+
+def is_active(user: UserRecord | None) -> bool:
+    return bool(user and user.status == "active")
+
+
+def is_pending(user: UserRecord | None) -> bool:
+    return bool(user and user.status == "pending")
+
+
+def is_blocked(user: UserRecord | None) -> bool:
+    return bool(user and user.status == "blocked")
 
 
 def format_chat_line(chat) -> str:

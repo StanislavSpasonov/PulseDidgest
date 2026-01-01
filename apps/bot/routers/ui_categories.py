@@ -9,8 +9,9 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from apps.bot.ui.callbacks import CategoryCb, CategoryDeliveryCb, CategorySourceCb, LinkCb, NavCb, DeliveryCb
-from apps.bot.ui.common import UiDeps, is_admin, respond, truncate
+from apps.bot.ui.common import UiDeps, fetch_user, is_admin, is_power, respond, truncate
 from apps.bot.ui.list_keyboard import build_one_column_list
+from src.application.services.access_control import can_edit
 
 
 class CategoryCreateState(StatesGroup):
@@ -250,27 +251,62 @@ def _format_delivery_summary(mode: Optional[str], interval: Optional[int], time_
 def build_router(deps: UiDeps) -> Router:
     router = Router()
 
+    async def _get_user(user_id: int | None):
+        return await fetch_user(deps, user_id)
+
+    async def _require_admin_or_power(event) -> Optional[object]:
+        user = await _get_user(event.from_user.id if event.from_user else None)
+        if not user or not (is_admin(user, deps.admin_user_id) or is_power(user, deps.admin_user_id)):
+            await respond(event, "Меню доступно только администраторам/модераторам.")
+            return None
+        return user
+
+    async def _can_edit_category(user, category_id: str) -> bool:
+        if is_admin(user, deps.admin_user_id):
+            return True
+        category = await asyncio.to_thread(deps.admin_repo.get_category_by_id, category_id)
+        permission = await asyncio.to_thread(
+            deps.access_repo.get_user_permission,
+            category_id,
+            user.id,
+        )
+        return can_edit(
+            role=user.role,
+            status=user.status,
+            is_owner=bool(category.owner_user_id and str(category.owner_user_id) == user.id),
+            acl_permission=permission,
+        )
+
     @router.callback_query(CategoryCb.filter(F.action == "menu"))
     async def handle_menu(callback: types.CallbackQuery, state: FSMContext) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
-            await respond(callback, "Меню доступно только администраторам.")
+        user = await _require_admin_or_power(callback)
+        if not user:
             return
         await state.clear()
         await respond(callback, "Категории", _build_categories_menu())
 
     @router.callback_query(CategoryCb.filter(F.action == "list"))
     async def handle_list(callback: types.CallbackQuery, callback_data: CategoryCb) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
-            await respond(callback, "Меню доступно только администраторам.")
+        user = await _require_admin_or_power(callback)
+        if not user:
             return
-        categories = await asyncio.to_thread(deps.admin_repo.list_categories)
+        if is_admin(user, deps.admin_user_id):
+            categories = await asyncio.to_thread(deps.admin_repo.list_categories)
+        else:
+            categories = await asyncio.to_thread(
+                deps.access_repo.list_editable_categories_for_user,
+                user.id,
+            )
         text, kb = _format_categories_list(categories, callback_data.page, 6, "Категории:")
         await respond(callback, text, kb)
 
     @router.callback_query(CategoryCb.filter(F.action == "detail"))
     async def handle_detail(callback: types.CallbackQuery, callback_data: CategoryCb) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
-            await respond(callback, "Меню доступно только администраторам.")
+        user = await _require_admin_or_power(callback)
+        if not user:
+            return
+        if not await _can_edit_category(user, callback_data.category_id):
+            await respond(callback, "Нет доступа к категории.")
             return
         try:
             category, links = await asyncio.to_thread(
@@ -284,8 +320,8 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(CategoryCb.filter(F.action == "search"))
     async def handle_search(callback: types.CallbackQuery, state: FSMContext) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
-            await respond(callback, "Меню доступно только администраторам.")
+        user = await _require_admin_or_power(callback)
+        if not user:
             return
         await state.set_state(CategorySearchState.query)
         await respond(
@@ -296,15 +332,21 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.message(CategorySearchState.query)
     async def handle_search_query(message: types.Message, state: FSMContext) -> None:
-        if not is_admin(message.from_user.id if message.from_user else None, deps.admin_user_id):
-            await message.answer("Меню доступно только администраторам.")
+        user = await _require_admin_or_power(message)
+        if not user:
             await state.clear()
             return
         query = (message.text or "").strip().lower()
         if not query:
             await message.answer("Введите непустой запрос.")
             return
-        categories = await asyncio.to_thread(deps.admin_repo.list_categories)
+        if is_admin(user, deps.admin_user_id):
+            categories = await asyncio.to_thread(deps.admin_repo.list_categories)
+        else:
+            categories = await asyncio.to_thread(
+                deps.access_repo.list_editable_categories_for_user,
+                user.id,
+            )
         filtered = [c for c in categories if query in c.name.lower()]
         if not filtered:
             await message.answer("Ничего не найдено.", reply_markup=_build_categories_menu())
@@ -316,9 +358,10 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(CategoryCb.filter(F.action == "create"))
     async def handle_create(callback: types.CallbackQuery, state: FSMContext) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
-            await respond(callback, "Меню доступно только администраторам.")
+        user = await _require_admin_or_power(callback)
+        if not user:
             return
+        await state.update_data(owner_user_id=user.id)
         await state.set_state(CategoryCreateState.name)
         await respond(
             callback,
@@ -328,8 +371,8 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.message(CategoryCreateState.name)
     async def handle_create_name(message: types.Message, state: FSMContext) -> None:
-        if not is_admin(message.from_user.id if message.from_user else None, deps.admin_user_id):
-            await message.answer("Меню доступно только администраторам.")
+        user = await _require_admin_or_power(message)
+        if not user:
             await state.clear()
             return
         name = (message.text or "").strip()
@@ -345,8 +388,8 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.message(CategoryCreateState.prompt)
     async def handle_create_prompt(message: types.Message, state: FSMContext) -> None:
-        if not is_admin(message.from_user.id if message.from_user else None, deps.admin_user_id):
-            await message.answer("Меню доступно только администраторам.")
+        user = await _require_admin_or_power(message)
+        if not user:
             await state.clear()
             return
         prompt = message.text or message.caption or ""
@@ -440,8 +483,8 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.message(CategoryCreateState.delivery_custom_time)
     async def handle_delivery_custom_time(message: types.Message, state: FSMContext) -> None:
-        if not is_admin(message.from_user.id if message.from_user else None, deps.admin_user_id):
-            await message.answer("Меню доступно только администраторам.")
+        user = await _require_admin_or_power(message)
+        if not user:
             await state.clear()
             return
         value = (message.text or "").strip()
@@ -478,6 +521,10 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(CategoryCb.filter(F.action == "create_save"), CategoryCreateState.summary)
     async def handle_create_save(callback: types.CallbackQuery, state: FSMContext) -> None:
+        user = await _require_admin_or_power(callback)
+        if not user:
+            await state.clear()
+            return
         data = await state.get_data()
         name = data.get("name")
         prompt = data.get("prompt") or ""
@@ -485,8 +532,9 @@ def build_router(deps: UiDeps) -> Router:
         mode = data.get("delivery_mode")
         interval = data.get("delivery_interval")
         time_local = data.get("delivery_time")
+        owner_user_id = data.get("owner_user_id") or user.id
         try:
-            await asyncio.to_thread(deps.admin_repo.create_category, name)
+            await asyncio.to_thread(deps.admin_repo.create_category, name, owner_user_id)
             await asyncio.to_thread(deps.admin_repo.set_category_prompt, name, prompt)
             for chat_id in selected:
                 await asyncio.to_thread(deps.admin_repo.bind_category, name, chat_id)
@@ -509,6 +557,12 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(CategoryCb.filter(F.action == "show_prompt"))
     async def handle_show_prompt(callback: types.CallbackQuery, callback_data: CategoryCb) -> None:
+        user = await _require_admin_or_power(callback)
+        if not user:
+            return
+        if not await _can_edit_category(user, callback_data.category_id):
+            await respond(callback, "Нет доступа к категории.")
+            return
         try:
             category, _ = await asyncio.to_thread(
                 deps.admin_repo.get_category_details_by_id, callback_data.category_id
@@ -527,6 +581,12 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(CategoryCb.filter(F.action == "edit_prompt"))
     async def handle_edit_prompt(callback: types.CallbackQuery, callback_data: CategoryCb, state: FSMContext) -> None:
+        user = await _require_admin_or_power(callback)
+        if not user:
+            return
+        if not await _can_edit_category(user, callback_data.category_id):
+            await respond(callback, "Нет доступа к категории.")
+            return
         category = await asyncio.to_thread(
             deps.admin_repo.get_category_by_id, callback_data.category_id
         )
@@ -540,6 +600,10 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.message(CategoryEditState.prompt)
     async def handle_edit_prompt_message(message: types.Message, state: FSMContext) -> None:
+        user = await _require_admin_or_power(message)
+        if not user:
+            await state.clear()
+            return
         data = await state.get_data()
         name = data.get("category")
         if not name:
@@ -557,6 +621,12 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(CategoryCb.filter(F.action == "rename"))
     async def handle_rename(callback: types.CallbackQuery, callback_data: CategoryCb, state: FSMContext) -> None:
+        user = await _require_admin_or_power(callback)
+        if not user:
+            return
+        if not await _can_edit_category(user, callback_data.category_id):
+            await respond(callback, "Нет доступа к категории.")
+            return
         category = await asyncio.to_thread(
             deps.admin_repo.get_category_by_id, callback_data.category_id
         )
@@ -570,6 +640,10 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.message(CategoryEditState.rename)
     async def handle_rename_message(message: types.Message, state: FSMContext) -> None:
+        user = await _require_admin_or_power(message)
+        if not user:
+            await state.clear()
+            return
         data = await state.get_data()
         name = data.get("category")
         new_name = (message.text or "").strip()
@@ -590,6 +664,12 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(CategoryCb.filter(F.action == "toggle_debug"))
     async def handle_toggle_debug(callback: types.CallbackQuery, callback_data: CategoryCb) -> None:
+        user = await _require_admin_or_power(callback)
+        if not user:
+            return
+        if not await _can_edit_category(user, callback_data.category_id):
+            await respond(callback, "Нет доступа к категории.")
+            return
         try:
             category = await asyncio.to_thread(
                 deps.admin_repo.get_category_by_id, callback_data.category_id
@@ -607,6 +687,12 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(CategoryCb.filter(F.action == "delete_confirm"))
     async def handle_delete_confirm(callback: types.CallbackQuery, callback_data: CategoryCb) -> None:
+        user = await _require_admin_or_power(callback)
+        if not user:
+            return
+        if not await _can_edit_category(user, callback_data.category_id):
+            await respond(callback, "Нет доступа к категории.")
+            return
         category = await asyncio.to_thread(
             deps.admin_repo.get_category_by_id, callback_data.category_id
         )
@@ -625,6 +711,12 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(CategoryCb.filter(F.action == "delete_yes"))
     async def handle_delete_yes(callback: types.CallbackQuery, callback_data: CategoryCb) -> None:
+        user = await _require_admin_or_power(callback)
+        if not user:
+            return
+        if not await _can_edit_category(user, callback_data.category_id):
+            await respond(callback, "Нет доступа к категории.")
+            return
         try:
             category = await asyncio.to_thread(
                 deps.admin_repo.get_category_by_id, callback_data.category_id

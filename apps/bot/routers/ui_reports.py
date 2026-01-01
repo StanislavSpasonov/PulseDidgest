@@ -8,7 +8,7 @@ from aiogram import F, Router, types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from apps.bot.ui.callbacks import NavCb, ReportCb
-from apps.bot.ui.common import UiDeps, is_admin, respond, truncate
+from apps.bot.ui.common import UiDeps, fetch_user, is_admin, respond, truncate
 from apps.bot.ui.list_keyboard import build_one_column_list
 
 
@@ -97,16 +97,20 @@ def _format_llm_errors(rows) -> str:
 def build_router(deps: UiDeps) -> Router:
     router = Router()
 
+    async def _is_admin(user_id: int | None) -> bool:
+        user = await fetch_user(deps, user_id)
+        return is_admin(user, deps.admin_user_id)
+
     @router.callback_query(ReportCb.filter(F.action == "menu"))
     async def handle_menu(callback: types.CallbackQuery) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         await respond(callback, "Отладка/Отчёты", _build_reports_menu())
 
     @router.callback_query(ReportCb.filter(F.action == "pick_last_pass"))
     async def handle_pick_last_pass(callback: types.CallbackQuery) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         categories = await asyncio.to_thread(deps.admin_repo.list_categories)
@@ -115,7 +119,7 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(ReportCb.filter(F.action == "pick_last_fail"))
     async def handle_pick_last_fail(callback: types.CallbackQuery) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         categories = await asyncio.to_thread(deps.admin_repo.list_categories)
@@ -124,7 +128,7 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(ReportCb.filter(F.action == "pick_summary"))
     async def handle_pick_summary(callback: types.CallbackQuery) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         categories = await asyncio.to_thread(deps.admin_repo.list_categories)
@@ -133,7 +137,7 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(ReportCb.filter(F.action == "pick_debug"))
     async def handle_pick_debug(callback: types.CallbackQuery) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         categories = await asyncio.to_thread(deps.admin_repo.list_categories)
@@ -142,7 +146,7 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(ReportCb.filter(F.action.in_(["last_pass_page", "last_fail_page", "summary_pick_page", "debug_toggle_page"])))
     async def handle_category_page(callback: types.CallbackQuery, callback_data: ReportCb) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         page = int(callback_data.value or "0")
@@ -159,7 +163,7 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(ReportCb.filter(F.action.in_(["last_pass", "last_fail"])))
     async def handle_limit_pick(callback: types.CallbackQuery, callback_data: ReportCb) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         await respond(
@@ -170,7 +174,7 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(ReportCb.filter(F.action.in_(["last_pass_run", "last_fail_run"])))
     async def handle_last_run(callback: types.CallbackQuery, callback_data: ReportCb) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         passed = callback_data.action == "last_pass_run"
@@ -191,14 +195,14 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(ReportCb.filter(F.action == "llm_menu"))
     async def handle_llm_menu(callback: types.CallbackQuery) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         await respond(callback, "Выберите период для LLM ошибок:", _build_period_kb("llm_run"))
 
     @router.callback_query(ReportCb.filter(F.action == "llm_run"))
     async def handle_llm_run(callback: types.CallbackQuery, callback_data: ReportCb) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         hours = int(callback_data.value or "24")
@@ -212,7 +216,7 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(ReportCb.filter(F.action == "summary_pick"))
     async def handle_summary_pick(callback: types.CallbackQuery, callback_data: ReportCb) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         await respond(
@@ -223,7 +227,7 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(ReportCb.filter(F.action == "summary_run"))
     async def handle_summary_run(callback: types.CallbackQuery, callback_data: ReportCb) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         hours = int(callback_data.value or "24")
@@ -243,7 +247,7 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(ReportCb.filter(F.action == "debug_toggle"))
     async def handle_debug_toggle(callback: types.CallbackQuery, callback_data: ReportCb) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         try:

@@ -40,6 +40,15 @@ class NotifierProtocol(Protocol):
     async def broadcast(self, text: str, parse_mode: str | None = None, reply_markup=None) -> bool:
         ...
 
+    async def send_to_chat(
+        self,
+        chat_id: int,
+        text: str,
+        parse_mode: str | None = None,
+        reply_markup=None,
+    ) -> bool:
+        ...
+
 
 class EnqueueDeliveryOutboxUseCase:
     def __init__(
@@ -58,6 +67,7 @@ class EnqueueDeliveryOutboxUseCase:
         policy: DeliveryPolicy,
         decision_id: str,
         message_id: int,
+        user_id: str | None = None,
     ) -> None:
         due_at = compute_due_at(policy)
         payload = format_item_html(
@@ -70,7 +80,7 @@ class EnqueueDeliveryOutboxUseCase:
         )
         item = DeliveryOutboxItem(
             id=str(uuid.uuid4()),
-            user_id=None,
+            user_id=user_id,
             decision_id=decision_id,
             category_id=route.category_id,
             category_name=route.category_name,
@@ -89,9 +99,10 @@ class EnqueueDeliveryOutboxUseCase:
         )
         self._repo.enqueue(item)
         self._logger.info(
-            "Outbox enqueued category=%s chat_id=%s due_at=%s",
+            "Outbox enqueued category=%s chat_id=%s user_id=%s due_at=%s",
             route.category_name,
             route.chat_id,
+            user_id,
             due_at.isoformat(),
         )
 
@@ -103,6 +114,8 @@ class DeliveryOutboxScheduler:
         notifier: NotifierProtocol,
         decision_repository: DecisionDeliveryRepository,
         delivery_repository=None,
+        user_repository=None,
+        user_delivery_repository=None,
         tick_seconds: int = 60,
         logger: logging.Logger | None = None,
         reply_markup_factory=None,
@@ -111,6 +124,8 @@ class DeliveryOutboxScheduler:
         self._notifier = notifier
         self._decision_repo = decision_repository
         self._delivery_repo = delivery_repository
+        self._user_repo = user_repository
+        self._user_delivery_repo = user_delivery_repository
         self._tick_seconds = max(15, tick_seconds)
         self._logger = logger or logging.getLogger("collector.delivery_outbox")
         self._reply_markup_factory = reply_markup_factory
@@ -145,9 +160,9 @@ class DeliveryOutboxScheduler:
         items = await asyncio.to_thread(self._repo.fetch_due, now)
         if not items:
             return
-        groups: dict[tuple[str, int], list[DeliveryOutboxItem]] = {}
+        groups: dict[tuple[str, int, str | None], list[DeliveryOutboxItem]] = {}
         for item in items:
-            key = (item.category_id, item.chat_id)
+            key = (item.category_id, item.chat_id, item.user_id)
             groups.setdefault(key, []).append(item)
         for group_items in groups.values():
             ids = [item.id for item in group_items]
@@ -160,21 +175,39 @@ class DeliveryOutboxScheduler:
                 self._reply_markup_factory() if self._reply_markup_factory else None
             )
             delivered = True
-            for chunk in split_message(payload):
-                ok = await self._notifier.broadcast(
-                    chunk,
-                    parse_mode="HTML",
-                    reply_markup=reply_markup,
-                )
-                if not ok:
+            user_id = group_items[0].user_id
+            if user_id and self._user_repo:
+                user = await asyncio.to_thread(self._user_repo.get_by_id, user_id)
+                if not user:
                     delivered = False
-                    break
+                else:
+                    for chunk in split_message(payload):
+                        ok = await self._notifier.send_to_chat(
+                            user.chat_id,
+                            chunk,
+                            parse_mode="HTML",
+                            reply_markup=reply_markup,
+                        )
+                        if not ok:
+                            delivered = False
+                            break
+            else:
+                for chunk in split_message(payload):
+                    ok = await self._notifier.broadcast(
+                        chunk,
+                        parse_mode="HTML",
+                        reply_markup=reply_markup,
+                    )
+                    if not ok:
+                        delivered = False
+                        break
             if delivered:
                 await asyncio.to_thread(self._repo.mark_sent, ids, now)
                 for item in group_items:
-                    await asyncio.to_thread(
-                        self._decision_repo.mark_decision_delivered, item.decision_id
-                    )
+                    if item.user_id is None:
+                        await asyncio.to_thread(
+                            self._decision_repo.mark_decision_delivered, item.decision_id
+                        )
                 if self._delivery_repo:
                     await asyncio.to_thread(
                         self._delivery_repo.update_last_sent_by_chat,
@@ -182,6 +215,22 @@ class DeliveryOutboxScheduler:
                         group_items[0].chat_id,
                         now,
                     )
+                if self._user_delivery_repo and group_items[0].user_id:
+                    updated = await asyncio.to_thread(
+                        self._user_delivery_repo.update_last_sent,
+                        group_items[0].user_id,
+                        group_items[0].category_id,
+                        group_items[0].chat_id,
+                        now,
+                    )
+                    if not updated:
+                        await asyncio.to_thread(
+                            self._user_delivery_repo.update_last_sent,
+                            group_items[0].user_id,
+                            group_items[0].category_id,
+                            None,
+                            now,
+                        )
             else:
                 for item in group_items:
                     await asyncio.to_thread(

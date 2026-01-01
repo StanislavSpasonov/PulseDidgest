@@ -17,6 +17,7 @@ from src.application.use_cases.delivery_outbox import (
     EnqueueDeliveryOutboxUseCase,
 )
 from src.application.use_cases.deliver_instant import DeliverInstantUseCase
+from src.application.use_cases.deliver_decision import DeliverDecisionUseCase
 from src.application.use_cases.filter_message_with_gemini import (
     FilterMessageWithGeminiUseCase,
 )
@@ -35,10 +36,12 @@ from src.application.use_cases.sync_categories_and_groups_from_config import (
 from src.infrastructure.db.engine import get_session_factory
 from src.infrastructure.db.repositories import (
     SQLAlchemyCategoryRepository,
+    SQLAlchemyCategoryAccessRepository,
     SQLAlchemyDeliveryOutboxRepository,
     SQLAlchemyDeliveryRepository,
     SQLAlchemyMessageDecisionRepository,
     SQLAlchemyUserRepository,
+    SQLAlchemyUserDeliveryRepository,
 )
 from src.infrastructure.collector.routing_cache import RoutingSnapshotCache
 from src.infrastructure.config import CollectorSettings, load_collector_settings, load_env_file
@@ -105,6 +108,8 @@ async def run_collector(settings: CollectorSettings) -> None:
     category_repository = SQLAlchemyCategoryRepository(session_factory=session_factory)
     delivery_repository = SQLAlchemyDeliveryRepository(session_factory=session_factory)
     user_repository = SQLAlchemyUserRepository(session_factory=session_factory)
+    access_repository = SQLAlchemyCategoryAccessRepository(session_factory=session_factory)
+    user_delivery_repository = SQLAlchemyUserDeliveryRepository(session_factory=session_factory)
 
     sync_use_case = SyncCategoriesAndGroupsFromConfigUseCase(
         repository=category_repository,
@@ -127,6 +132,7 @@ async def run_collector(settings: CollectorSettings) -> None:
     notifier: UserNotifier | None = None
     bot_sender: TelegramBotSender | None = None
     instant_delivery: DeliverInstantUseCase | None = None
+    deliver_decision_use_case: DeliverDecisionUseCase | None = None
     outbox_scheduler: DeliveryOutboxScheduler | None = None
     debug_throttle = DebugThrottle()
 
@@ -147,11 +153,20 @@ async def run_collector(settings: CollectorSettings) -> None:
             logger=logger,
             reply_markup_factory=build_menu_button_keyboard,
         )
+        deliver_decision_use_case = DeliverDecisionUseCase(
+            access_repo=access_repository,
+            user_delivery_repo=user_delivery_repository,
+            instant_delivery_use_case=instant_delivery,
+            outbox_use_case=outbox_use_case,
+            logger=logger,
+        )
         outbox_scheduler = DeliveryOutboxScheduler(
             repository=outbox_repo,
             notifier=notifier,
             decision_repository=message_repository,
             delivery_repository=delivery_repository,
+            user_repository=user_repository,
+            user_delivery_repository=user_delivery_repository,
             tick_seconds=settings.delivery_tick_seconds,
             logger=logger,
             reply_markup_factory=build_menu_button_keyboard,
@@ -170,6 +185,7 @@ async def run_collector(settings: CollectorSettings) -> None:
         store_use_case=store_use_case,
         instant_delivery_use_case=instant_delivery,
         outbox_use_case=outbox_use_case,
+        deliver_decision_use_case=deliver_decision_use_case if settings.bot_token else None,
         notifier=notifier,
         debug_throttle=debug_throttle,
         cooldown=cooldown,

@@ -5,8 +5,15 @@
 
 ## In Progress
 - Уточнить задачу «upgrade»: что конкретно нужно обновить?
+- Epic: Multi-user (RBAC/ACL + персональная доставка + feedback/inbox)
 
 ## Done
+- Audit: зафиксированы текущие таблицы, команды бота, admin gate и user_id (см. PROJECT_MEMO.md)
+- Users: добавлены role/status + /start gating + bootstrap admin
+- ACL: owner_user_id + category_acl + UI выдачи/отзыва доступа
+- Delivery: персональные настройки + персонифицированная доставка через outbox
+- Feedback/Inbox: заявки и обратная связь + inbox для admin
+- Tests: ACL resolve, user delivery policy, status gating
 - Project initialization (clean architecture + docs) — структура репо и базовые спецификации
 - Telegram collector: receive messages from one group — Telethon collector выводит новые сообщения в stdout
 - Gemini filter (MVP) — сообщения проходят через Gemini и логируется решение pass/score/reason
@@ -38,4 +45,4 @@
 - Epic: MVP hardening (dynamic routing, delivery outbox/scheduler, formatting, UX, tests, docs)
 
 ## Next
-- AWS deploy prep: docker/systemd service + env/secrets + logging/monitoring checklist
+- Пробежать тесты + проверить миграции/бот-флоу end-to-end

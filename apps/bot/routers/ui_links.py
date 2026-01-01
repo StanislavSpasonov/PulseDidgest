@@ -9,8 +9,9 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from apps.bot.ui.callbacks import LinkCb, LinkSelectCb, NavCb
-from apps.bot.ui.common import UiDeps, is_admin, respond
+from apps.bot.ui.common import UiDeps, fetch_user, is_admin, is_power, respond
 from apps.bot.ui.list_keyboard import build_one_column_list
+from src.application.services.access_control import can_edit
 
 
 class LinkSelectState(StatesGroup):
@@ -98,15 +99,44 @@ def _build_groups_select_kb(
 def build_router(deps: UiDeps) -> Router:
     router = Router()
 
+    async def _require_admin_or_power(event):
+        user = await fetch_user(deps, event.from_user.id if event.from_user else None)
+        if not user or not (is_admin(user, deps.admin_user_id) or is_power(user, deps.admin_user_id)):
+            await respond(event, "Меню доступно только администраторам/модераторам.")
+            return None
+        return user
+
+    async def _can_manage_category(user, category_id: str) -> bool:
+        if is_admin(user, deps.admin_user_id):
+            return True
+        category = await asyncio.to_thread(deps.admin_repo.get_category_by_id, category_id)
+        permission = await asyncio.to_thread(
+            deps.access_repo.get_user_permission,
+            category_id,
+            user.id,
+        )
+        return can_edit(
+            role=user.role,
+            status=user.status,
+            is_owner=bool(category.owner_user_id and str(category.owner_user_id) == user.id),
+            acl_permission=permission,
+        )
+
     @router.callback_query(LinkCb.filter(F.action == "menu"))
     async def handle_menu(
         callback: types.CallbackQuery, callback_data: LinkCb, state: FSMContext
     ) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
-            await respond(callback, "Меню доступно только администраторам.")
+        user = await _require_admin_or_power(callback)
+        if not user:
             return
         await state.clear()
-        categories = await asyncio.to_thread(deps.admin_repo.list_categories)
+        if is_admin(user, deps.admin_user_id):
+            categories = await asyncio.to_thread(deps.admin_repo.list_categories)
+        else:
+            categories = await asyncio.to_thread(
+                deps.access_repo.list_editable_categories_for_user,
+                user.id,
+            )
         text, kb = _build_categories_list(categories, callback_data.page, 6)
         await respond(callback, text, kb)
 
@@ -114,8 +144,11 @@ def build_router(deps: UiDeps) -> Router:
     async def handle_category(
         callback: types.CallbackQuery, callback_data: LinkCb, state: FSMContext
     ) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
-            await respond(callback, "Меню доступно только администраторам.")
+        user = await _require_admin_or_power(callback)
+        if not user:
+            return
+        if not await _can_manage_category(user, callback_data.category_id):
+            await respond(callback, "Нет доступа к категории.")
             return
         await state.clear()
         try:
@@ -130,8 +163,11 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(LinkCb.filter(F.action == "add"))
     async def handle_add(callback: types.CallbackQuery, callback_data: LinkCb, state: FSMContext) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
-            await respond(callback, "Меню доступно только администраторам.")
+        user = await _require_admin_or_power(callback)
+        if not user:
+            return
+        if not await _can_manage_category(user, callback_data.category_id):
+            await respond(callback, "Нет доступа к категории.")
             return
         await state.set_state(LinkSelectState.add_select)
         await state.update_data(category_id=callback_data.category_id, selected_chat_ids=[])
@@ -148,8 +184,11 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(LinkCb.filter(F.action == "remove"))
     async def handle_remove(callback: types.CallbackQuery, callback_data: LinkCb, state: FSMContext) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
-            await respond(callback, "Меню доступно только администраторам.")
+        user = await _require_admin_or_power(callback)
+        if not user:
+            return
+        if not await _can_manage_category(user, callback_data.category_id):
+            await respond(callback, "Нет доступа к категории.")
             return
         await state.set_state(LinkSelectState.remove_select)
         await state.update_data(category_id=callback_data.category_id, selected_chat_ids=[])
@@ -164,12 +203,15 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(LinkSelectCb.filter(F.action == "add_toggle"), LinkSelectState.add_select)
     async def handle_add_toggle(callback: types.CallbackQuery, callback_data: LinkSelectCb, state: FSMContext) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
-            await respond(callback, "Меню доступно только администраторам.")
+        user = await _require_admin_or_power(callback)
+        if not user:
             return
         data = await state.get_data()
         selected = set(data.get("selected_chat_ids", []))
         category_id = data.get("category_id", "")
+        if not await _can_manage_category(user, category_id):
+            await respond(callback, "Нет доступа к категории.")
+            return
         if callback_data.chat_id in selected:
             selected.remove(callback_data.chat_id)
         else:
@@ -188,12 +230,15 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(LinkSelectCb.filter(F.action == "remove_toggle"), LinkSelectState.remove_select)
     async def handle_remove_toggle(callback: types.CallbackQuery, callback_data: LinkSelectCb, state: FSMContext) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
-            await respond(callback, "Меню доступно только администраторам.")
+        user = await _require_admin_or_power(callback)
+        if not user:
             return
         data = await state.get_data()
         selected = set(data.get("selected_chat_ids", []))
         category_id = data.get("category_id", "")
+        if not await _can_manage_category(user, category_id):
+            await respond(callback, "Нет доступа к категории.")
+            return
         if callback_data.chat_id in selected:
             selected.remove(callback_data.chat_id)
         else:
@@ -210,12 +255,15 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(LinkSelectCb.filter(F.action == "add_page"), LinkSelectState.add_select)
     async def handle_add_page(callback: types.CallbackQuery, callback_data: LinkSelectCb, state: FSMContext) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
-            await respond(callback, "Меню доступно только администраторам.")
+        user = await _require_admin_or_power(callback)
+        if not user:
             return
         data = await state.get_data()
         selected = set(data.get("selected_chat_ids", []))
         category_id = data.get("category_id", "")
+        if not await _can_manage_category(user, category_id):
+            await respond(callback, "Нет доступа к категории.")
+            return
         groups = await asyncio.to_thread(deps.admin_repo.list_groups)
         _, links = await asyncio.to_thread(
             deps.admin_repo.get_category_details_by_id, category_id
@@ -229,12 +277,15 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(LinkSelectCb.filter(F.action == "remove_page"), LinkSelectState.remove_select)
     async def handle_remove_page(callback: types.CallbackQuery, callback_data: LinkSelectCb, state: FSMContext) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
-            await respond(callback, "Меню доступно только администраторам.")
+        user = await _require_admin_or_power(callback)
+        if not user:
             return
         data = await state.get_data()
         selected = set(data.get("selected_chat_ids", []))
         category_id = data.get("category_id", "")
+        if not await _can_manage_category(user, category_id):
+            await respond(callback, "Нет доступа к категории.")
+            return
         _, links = await asyncio.to_thread(
             deps.admin_repo.get_category_details_by_id, category_id
         )
@@ -246,11 +297,14 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(LinkSelectCb.filter(F.action == "add_save"), LinkSelectState.add_select)
     async def handle_add_save(callback: types.CallbackQuery, state: FSMContext) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
-            await respond(callback, "Меню доступно только администраторам.")
+        user = await _require_admin_or_power(callback)
+        if not user:
             return
         data = await state.get_data()
         category_id = data.get("category_id", "")
+        if not await _can_manage_category(user, category_id):
+            await respond(callback, "Нет доступа к категории.")
+            return
         selected = set(data.get("selected_chat_ids", []))
         category = await asyncio.to_thread(deps.admin_repo.get_category_by_id, category_id)
         for chat_id in selected:
@@ -265,11 +319,14 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(LinkSelectCb.filter(F.action == "remove_save"), LinkSelectState.remove_select)
     async def handle_remove_save(callback: types.CallbackQuery, state: FSMContext) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
-            await respond(callback, "Меню доступно только администраторам.")
+        user = await _require_admin_or_power(callback)
+        if not user:
             return
         data = await state.get_data()
         category_id = data.get("category_id", "")
+        if not await _can_manage_category(user, category_id):
+            await respond(callback, "Нет доступа к категории.")
+            return
         selected = set(data.get("selected_chat_ids", []))
         category = await asyncio.to_thread(deps.admin_repo.get_category_by_id, category_id)
         for chat_id in selected:

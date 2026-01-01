@@ -10,7 +10,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from apps.bot.ui.callbacks import DeliveryCb, NavCb
-from apps.bot.ui.common import UiDeps, is_admin, respond
+from apps.bot.ui.common import UiDeps, fetch_user, is_admin, respond
 from apps.bot.ui.list_keyboard import build_one_column_list
 from src.application.services.message_formatter import format_digest_message_html, split_message
 from apps.bot.ui.reply_menu import build_menu_button_keyboard
@@ -101,9 +101,13 @@ def _build_digest_message(category: str, group_title: Optional[str], decisions) 
 def build_router(deps: UiDeps) -> Router:
     router = Router()
 
+    async def _is_admin(user_id: int | None) -> bool:
+        user = await fetch_user(deps, user_id)
+        return is_admin(user, deps.admin_user_id)
+
     @router.callback_query(DeliveryCb.filter(F.action == "menu"))
     async def handle_menu(callback: types.CallbackQuery, callback_data: DeliveryCb) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         page = int(callback_data.value or "0")
@@ -113,7 +117,7 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(DeliveryCb.filter(F.action == "category"))
     async def handle_category(callback: types.CallbackQuery, callback_data: DeliveryCb) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         try:
@@ -132,7 +136,7 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(DeliveryCb.filter(F.action == "instant_toggle"))
     async def handle_instant_toggle(callback: types.CallbackQuery, callback_data: DeliveryCb) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         category = await asyncio.to_thread(
@@ -155,7 +159,7 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(DeliveryCb.filter(F.action == "digest_toggle"))
     async def handle_digest_toggle(callback: types.CallbackQuery, callback_data: DeliveryCb) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         category = await asyncio.to_thread(
@@ -180,7 +184,7 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(DeliveryCb.filter(F.action == "preset"))
     async def handle_preset(callback: types.CallbackQuery, callback_data: DeliveryCb) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         category = await asyncio.to_thread(
@@ -210,7 +214,7 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(DeliveryCb.filter(F.action == "custom"))
     async def handle_custom(callback: types.CallbackQuery, callback_data: DeliveryCb, state: FSMContext) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         await state.set_state(DeliveryTimeState.custom_time)
@@ -223,7 +227,7 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.message(DeliveryTimeState.custom_time)
     async def handle_custom_time(message: types.Message, state: FSMContext) -> None:
-        if not is_admin(message.from_user.id if message.from_user else None, deps.admin_user_id):
+        if not await _is_admin(message.from_user.id if message.from_user else None):
             await message.answer("Меню доступно только администраторам.")
             await state.clear()
             return
@@ -254,7 +258,7 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(DeliveryCb.filter(F.action == "test_digest"))
     async def handle_test_digest(callback: types.CallbackQuery, callback_data: DeliveryCb) -> None:
-        if not is_admin(callback.from_user.id, deps.admin_user_id):
+        if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         try:

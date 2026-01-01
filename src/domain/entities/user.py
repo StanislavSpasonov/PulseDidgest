@@ -9,8 +9,12 @@ from typing import Optional
 @dataclass(frozen=True)
 class UserRecord:
     id: Optional[str]
-    tg_user_id: int
+    telegram_user_id: int
     chat_id: int
     username: Optional[str]
-    is_active: bool
+    first_name: Optional[str]
+    role: str
+    status: str
     created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    last_seen_at: Optional[datetime] = None
