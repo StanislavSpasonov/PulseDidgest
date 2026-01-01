@@ -33,6 +33,8 @@ def test_callback_payload_lengths_fit_telegram_limit() -> None:
     _assert_cb_fits(LinkSelectCb(action="add_toggle", chat_id=chat_id, page=9))
     _assert_cb_fits(InboxCb(action="open", message_id=message_id))
     _assert_cb_fits(UserDeliveryCb(action="open", category_id=category_id))
+    _assert_cb_fits(UserDeliveryCb(action="preset", category_id=category_id, value="interval|180"))
+    _assert_cb_fits(UserDeliveryCb(action="preset", category_id=category_id, value="daily|18-00"))
     _assert_cb_fits(DeliveryCb(action="preset", category_id=category_id, value="daily|18-00"))
     _assert_cb_fits(AccessCb(action="category", category_id=category_id))
     _assert_cb_fits(AccessCb(action="user", user_id=user_id))

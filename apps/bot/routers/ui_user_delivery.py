@@ -3,11 +3,17 @@ from __future__ import annotations
 import asyncio
 
 from aiogram import F, Router, types
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from apps.bot.ui.callbacks import NavCb, UserDeliveryCb
 from apps.bot.ui.common import UiDeps, fetch_user, is_active, respond
 from apps.bot.ui.list_keyboard import build_one_column_list
+
+
+class UserDeliveryTimeState(StatesGroup):
+    custom_time = State()
 
 
 def _build_categories_list(categories, page: int):
@@ -24,13 +30,17 @@ def _build_categories_list(categories, page: int):
     return page_obj, kb
 
 
-def _build_delivery_kb(category_id: str, enabled: bool) -> types.InlineKeyboardMarkup:
+def _build_delivery_kb(category_id: str, mode: str, enabled: bool) -> types.InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    toggle_text = "✅ Вкл" if not enabled else "⛔ Выкл"
-    builder.button(text=toggle_text, callback_data=UserDeliveryCb(action="toggle", category_id=category_id).pack())
-    builder.button(text="⚡ Instant", callback_data=UserDeliveryCb(action="instant", category_id=category_id).pack())
-    builder.button(text="⏱️ Digest 60m", callback_data=UserDeliveryCb(action="interval_60", category_id=category_id).pack())
-    builder.button(text="🕘 Digest daily 09:00", callback_data=UserDeliveryCb(action="daily_0900", category_id=category_id).pack())
+    instant_label = "🚀 Instant: ON" if mode == "instant" and enabled else "🚀 Instant: OFF"
+    digest_label = "🧾 Digest: ON" if mode == "digest" and enabled else "🧾 Digest: OFF"
+    builder.button(text=instant_label, callback_data=UserDeliveryCb(action="instant_toggle", category_id=category_id).pack())
+    builder.button(text=digest_label, callback_data=UserDeliveryCb(action="digest_toggle", category_id=category_id).pack())
+    builder.button(text="каждый час", callback_data=UserDeliveryCb(action="preset", category_id=category_id, value="interval|60").pack())
+    builder.button(text="каждые 3 часа", callback_data=UserDeliveryCb(action="preset", category_id=category_id, value="interval|180").pack())
+    builder.button(text="ежедневно 08:00", callback_data=UserDeliveryCb(action="preset", category_id=category_id, value="daily|08-00").pack())
+    builder.button(text="ежедневно 18:00", callback_data=UserDeliveryCb(action="preset", category_id=category_id, value="daily|18-00").pack())
+    builder.button(text="своё время (HH:MM)", callback_data=UserDeliveryCb(action="custom", category_id=category_id).pack())
     builder.button(text="⬅️ Назад", callback_data=UserDeliveryCb(action="menu").pack())
     builder.button(text="🏠 Домой", callback_data=NavCb(action="home").pack())
     builder.adjust(1)
@@ -47,8 +57,27 @@ def build_router(deps: UiDeps) -> Router:
         categories = await asyncio.to_thread(deps.access_repo.list_categories_for_user, user.id)
         return user, categories
 
+    async def _render_category(event: types.CallbackQuery | types.Message, user, category_id: str) -> None:
+        category = await asyncio.to_thread(deps.admin_repo.get_category_by_id, category_id)
+        pref = await asyncio.to_thread(
+            deps.user_delivery_repo.get_user_category_delivery,
+            user.id,
+            category_id,
+        )
+        enabled = pref.enabled if pref else False
+        mode = pref.mode if pref else "instant"
+        digest = ""
+        if pref and pref.mode == "digest":
+            if pref.digest_kind == "interval":
+                digest = f" interval={pref.interval_minutes}m"
+            elif pref.digest_kind == "daily":
+                digest = f" daily={pref.daily_time_hhmm}"
+        text = f"Категория: {category.name}\nEnabled: {enabled}\nMode: {mode}{digest}"
+        await respond(event, text, _build_delivery_kb(category_id, mode, enabled))
+
     @router.callback_query(UserDeliveryCb.filter(F.action == "menu"))
-    async def handle_menu(callback: types.CallbackQuery) -> None:
+    async def handle_menu(callback: types.CallbackQuery, state: FSMContext) -> None:
+        await state.clear()
         user, categories = await _get_user_and_categories(callback.from_user.id)
         if not user:
             await respond(callback, "Доступ недоступен.")
@@ -60,7 +89,8 @@ def build_router(deps: UiDeps) -> Router:
         await respond(callback, "Настройки доставки:", kb)
 
     @router.callback_query(UserDeliveryCb.filter(F.action == "page"))
-    async def handle_page(callback: types.CallbackQuery, callback_data: UserDeliveryCb) -> None:
+    async def handle_page(callback: types.CallbackQuery, callback_data: UserDeliveryCb, state: FSMContext) -> None:
+        await state.clear()
         user, categories = await _get_user_and_categories(callback.from_user.id)
         if not user:
             await respond(callback, "Доступ недоступен.")
@@ -72,27 +102,13 @@ def build_router(deps: UiDeps) -> Router:
         await respond(callback, "Настройки доставки:", kb)
 
     @router.callback_query(UserDeliveryCb.filter(F.action == "open"))
-    async def handle_open(callback: types.CallbackQuery, callback_data: UserDeliveryCb) -> None:
+    async def handle_open(callback: types.CallbackQuery, callback_data: UserDeliveryCb, state: FSMContext) -> None:
+        await state.clear()
         user = await fetch_user(deps, callback.from_user.id)
         if not is_active(user):
             await respond(callback, "Доступ недоступен.")
             return
-        category = await asyncio.to_thread(deps.admin_repo.get_category_by_id, callback_data.category_id)
-        pref = await asyncio.to_thread(
-            deps.user_delivery_repo.get_user_category_delivery,
-            user.id,
-            callback_data.category_id,
-        )
-        enabled = pref.enabled if pref else False
-        mode = pref.mode if pref else "instant"
-        digest = ""
-        if pref and pref.mode == "digest":
-            if pref.digest_kind == "interval":
-                digest = f" interval={pref.interval_minutes}m"
-            elif pref.digest_kind == "daily":
-                digest = f" daily={pref.daily_time_hhmm}"
-        text = f"Категория: {category.name}\nEnabled: {enabled}\nMode: {mode}{digest}"
-        await respond(callback, text, _build_delivery_kb(callback_data.category_id, enabled))
+        await _render_category(callback, user, callback_data.category_id)
 
     @router.callback_query(UserDeliveryCb.filter(F.action == "toggle"))
     async def handle_toggle(callback: types.CallbackQuery, callback_data: UserDeliveryCb) -> None:
@@ -122,10 +138,10 @@ def build_router(deps: UiDeps) -> Router:
             daily,
             tz,
         )
-        await respond(callback, "Настройки обновлены.")
+        await _render_category(callback, user, callback_data.category_id)
 
-    @router.callback_query(UserDeliveryCb.filter(F.action.in_({"instant", "interval_60", "daily_0900"})))
-    async def handle_mode(callback: types.CallbackQuery, callback_data: UserDeliveryCb) -> None:
+    @router.callback_query(UserDeliveryCb.filter(F.action == "instant_toggle"))
+    async def handle_instant_toggle(callback: types.CallbackQuery, callback_data: UserDeliveryCb) -> None:
         user = await fetch_user(deps, callback.from_user.id)
         if not is_active(user):
             await respond(callback, "Доступ недоступен.")
@@ -135,18 +151,45 @@ def build_router(deps: UiDeps) -> Router:
             user.id,
             callback_data.category_id,
         )
-        enabled = pref.enabled if pref else True
-        mode = "instant"
-        digest_kind = None
-        interval = None
-        daily = None
-        if callback_data.action == "interval_60":
-            mode = "digest"
-            digest_kind = "interval"
-            interval = 60
-        elif callback_data.action == "daily_0900":
-            mode = "digest"
-            digest_kind = "daily"
+        enabled = pref.enabled if pref else False
+        if pref and pref.mode == "instant" and enabled:
+            enabled = False
+        else:
+            enabled = True
+        tz = pref.timezone if pref else deps.default_tz
+        await asyncio.to_thread(
+            deps.user_delivery_repo.upsert_user_category_delivery,
+            user.id,
+            callback_data.category_id,
+            enabled,
+            "instant",
+            None,
+            None,
+            None,
+            tz,
+        )
+        await _render_category(callback, user, callback_data.category_id)
+
+    @router.callback_query(UserDeliveryCb.filter(F.action == "digest_toggle"))
+    async def handle_digest_toggle(callback: types.CallbackQuery, callback_data: UserDeliveryCb) -> None:
+        user = await fetch_user(deps, callback.from_user.id)
+        if not is_active(user):
+            await respond(callback, "Доступ недоступен.")
+            return
+        pref = await asyncio.to_thread(
+            deps.user_delivery_repo.get_user_category_delivery,
+            user.id,
+            callback_data.category_id,
+        )
+        enabled = pref.enabled if pref else False
+        if pref and pref.mode == "digest" and enabled:
+            enabled = False
+        else:
+            enabled = True
+        digest_kind = pref.digest_kind if pref and pref.digest_kind else "interval"
+        interval = pref.interval_minutes if pref else 60
+        daily = pref.daily_time_hhmm if pref else None
+        if digest_kind == "daily" and not daily:
             daily = "09:00"
         tz = pref.timezone if pref else deps.default_tz
         await asyncio.to_thread(
@@ -154,12 +197,94 @@ def build_router(deps: UiDeps) -> Router:
             user.id,
             callback_data.category_id,
             enabled,
-            mode,
+            "digest",
             digest_kind,
-            interval,
-            daily,
+            interval if digest_kind == "interval" else None,
+            daily if digest_kind == "daily" else None,
             tz,
         )
-        await respond(callback, "Настройки обновлены.")
+        await _render_category(callback, user, callback_data.category_id)
+
+    @router.callback_query(UserDeliveryCb.filter(F.action == "preset"))
+    async def handle_preset(callback: types.CallbackQuery, callback_data: UserDeliveryCb) -> None:
+        user = await fetch_user(deps, callback.from_user.id)
+        if not is_active(user):
+            await respond(callback, "Доступ недоступен.")
+            return
+        value = callback_data.value or ""
+        digest_kind = "interval"
+        interval = 60
+        daily = None
+        if value.startswith("interval|"):
+            digest_kind = "interval"
+            interval = int(value.split("|", 1)[1])
+        if value.startswith("daily|"):
+            digest_kind = "daily"
+            daily = value.split("|", 1)[1].replace("-", ":")
+        pref = await asyncio.to_thread(
+            deps.user_delivery_repo.get_user_category_delivery,
+            user.id,
+            callback_data.category_id,
+        )
+        tz = pref.timezone if pref else deps.default_tz
+        await asyncio.to_thread(
+            deps.user_delivery_repo.upsert_user_category_delivery,
+            user.id,
+            callback_data.category_id,
+            True,
+            "digest",
+            digest_kind,
+            interval if digest_kind == "interval" else None,
+            daily if digest_kind == "daily" else None,
+            tz,
+        )
+        await _render_category(callback, user, callback_data.category_id)
+
+    @router.callback_query(UserDeliveryCb.filter(F.action == "custom"))
+    async def handle_custom(callback: types.CallbackQuery, callback_data: UserDeliveryCb, state: FSMContext) -> None:
+        user = await fetch_user(deps, callback.from_user.id)
+        if not is_active(user):
+            await respond(callback, "Доступ недоступен.")
+            return
+        await state.set_state(UserDeliveryTimeState.custom_time)
+        await state.update_data(category_id=callback_data.category_id)
+        builder = InlineKeyboardBuilder()
+        builder.button(text="⬅️ Назад", callback_data=UserDeliveryCb(action="open", category_id=callback_data.category_id).pack())
+        builder.button(text="🏠 Домой", callback_data=NavCb(action="home").pack())
+        builder.adjust(2)
+        await respond(callback, "Введите время в формате HH:MM:", builder.as_markup())
+
+    @router.message(UserDeliveryTimeState.custom_time)
+    async def handle_custom_time(message: types.Message, state: FSMContext) -> None:
+        user = await fetch_user(deps, message.from_user.id if message.from_user else None)
+        if not is_active(user):
+            await message.answer("Доступ недоступен.")
+            await state.clear()
+            return
+        data = await state.get_data()
+        category_id = data.get("category_id", "")
+        value = (message.text or "").strip()
+        if ":" not in value:
+            await message.answer("Неверный формат. Пример: 08:00")
+            return
+        pref = await asyncio.to_thread(
+            deps.user_delivery_repo.get_user_category_delivery,
+            user.id,
+            category_id,
+        )
+        tz = pref.timezone if pref else deps.default_tz
+        await asyncio.to_thread(
+            deps.user_delivery_repo.upsert_user_category_delivery,
+            user.id,
+            category_id,
+            True,
+            "digest",
+            "daily",
+            None,
+            value,
+            tz,
+        )
+        await state.clear()
+        await _render_category(message, user, category_id)
 
     return router

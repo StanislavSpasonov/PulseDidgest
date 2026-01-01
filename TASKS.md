@@ -18,6 +18,7 @@
 - Fix: UI пользователей позволяет перейти к списку всех и менять роли активных
 - Tests: контроль длины callback data (64 bytes) для основных UI callbacks
 - Fix: тест callback length учитывает реальные комбинации callback data
+- UI: доставка для пользователя расширена до полноценной настройки (instant/digest/presets/custom)
 - Project initialization (clean architecture + docs) — структура репо и базовые спецификации
 - Telegram collector: receive messages from one group — Telethon collector выводит новые сообщения в stdout
 - Gemini filter (MVP) — сообщения проходят через Gemini и логируется решение pass/score/reason
@@ -49,4 +50,4 @@
 - Epic: MVP hardening (dynamic routing, delivery outbox/scheduler, formatting, UX, tests, docs)
 
 ## Next
-- Проверить выдачу доступа к категориям (grant/revoke) через UI
+- Проверить настройку доставки пользователем (instant/digest/presets/custom)
