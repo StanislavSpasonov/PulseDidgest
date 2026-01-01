@@ -14,6 +14,7 @@
 - Delivery: персональные настройки + персонифицированная доставка через outbox
 - Feedback/Inbox: заявки и обратная связь + inbox для admin
 - Tests: ACL resolve, user delivery policy, status gating
+- Fix: UI Access callback data укорочены (stateful category_id)
 - Project initialization (clean architecture + docs) — структура репо и базовые спецификации
 - Telegram collector: receive messages from one group — Telethon collector выводит новые сообщения в stdout
 - Gemini filter (MVP) — сообщения проходят через Gemini и логируется решение pass/score/reason

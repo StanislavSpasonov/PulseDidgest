@@ -3,11 +3,17 @@ from __future__ import annotations
 import asyncio
 
 from aiogram import F, Router, types
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from apps.bot.ui.callbacks import AccessCb, NavCb
 from apps.bot.ui.common import UiDeps, fetch_user, is_admin, respond
 from apps.bot.ui.list_keyboard import build_one_column_list
+
+
+class AccessState(StatesGroup):
+    category_id = State()
 
 
 def _build_categories_list(categories, page: int):
@@ -24,7 +30,7 @@ def _build_categories_list(categories, page: int):
     return page_obj, kb
 
 
-def _build_user_access_list(users, category_id: str, permissions: dict[str, str], owner_id: str | None, page: int):
+def _build_user_access_list(users, permissions: dict[str, str], owner_id: str | None, page: int):
     def _label(user) -> str:
         if user.role == "admin":
             return f"@{user.username or 'unknown'} (admin)"
@@ -35,10 +41,10 @@ def _build_user_access_list(users, category_id: str, permissions: dict[str, str]
     page_obj, kb = build_one_column_list(
         users,
         label_fn=_label,
-        callback_fn=lambda user: AccessCb(action="user", category_id=category_id, user_id=str(user.id)).pack(),
+        callback_fn=lambda user: AccessCb(action="user", user_id=str(user.id)).pack(),
         page=page,
         page_size=6,
-        page_callback_fn=lambda p: AccessCb(action="user_page", category_id=category_id, page=p).pack(),
+        page_callback_fn=lambda p: AccessCb(action="user_page", page=p).pack(),
         back_cb=AccessCb(action="menu").pack(),
         home_cb=NavCb(action="home").pack(),
     )
@@ -65,10 +71,11 @@ def build_router(deps: UiDeps) -> Router:
         return is_admin(user, deps.admin_user_id)
 
     @router.callback_query(AccessCb.filter(F.action == "menu"))
-    async def handle_menu(callback: types.CallbackQuery) -> None:
+    async def handle_menu(callback: types.CallbackQuery, state: FSMContext) -> None:
         if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
+        await state.clear()
         categories = await asyncio.to_thread(deps.admin_repo.list_categories)
         if not categories:
             await respond(callback, "Категорий нет.")
@@ -77,10 +84,11 @@ def build_router(deps: UiDeps) -> Router:
         await respond(callback, "Выберите категорию:", kb)
 
     @router.callback_query(AccessCb.filter(F.action == "page"))
-    async def handle_page(callback: types.CallbackQuery, callback_data: AccessCb) -> None:
+    async def handle_page(callback: types.CallbackQuery, callback_data: AccessCb, state: FSMContext) -> None:
         if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
+        await state.clear()
         categories = await asyncio.to_thread(deps.admin_repo.list_categories)
         if not categories:
             await respond(callback, "Категорий нет.")
@@ -89,75 +97,108 @@ def build_router(deps: UiDeps) -> Router:
         await respond(callback, "Выберите категорию:", kb)
 
     @router.callback_query(AccessCb.filter(F.action == "category"))
-    async def handle_category(callback: types.CallbackQuery, callback_data: AccessCb) -> None:
+    async def handle_category(callback: types.CallbackQuery, callback_data: AccessCb, state: FSMContext) -> None:
         if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         if not callback_data.category_id:
             await respond(callback, "Категория не найдена.")
             return
+        await state.clear()
+        await state.set_state(AccessState.category_id)
+        await state.update_data(category_id=callback_data.category_id)
         category = await asyncio.to_thread(deps.admin_repo.get_category_by_id, callback_data.category_id)
         users = await asyncio.to_thread(deps.user_repo.list_users, "active")
         entries = await asyncio.to_thread(deps.access_repo.list_acl_entries, callback_data.category_id)
         permissions = {entry.user_id: entry.permission for entry in entries}
-        _, kb = _build_user_access_list(users, callback_data.category_id, permissions, str(category.owner_user_id) if category.owner_user_id else None, 0)
+        _, kb = _build_user_access_list(
+            users,
+            permissions,
+            str(category.owner_user_id) if category.owner_user_id else None,
+            0,
+        )
         await respond(callback, f"Доступ к категории: {category.name}", kb)
 
     @router.callback_query(AccessCb.filter(F.action == "user_page"))
-    async def handle_user_page(callback: types.CallbackQuery, callback_data: AccessCb) -> None:
+    async def handle_user_page(callback: types.CallbackQuery, callback_data: AccessCb, state: FSMContext) -> None:
         if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
-        category = await asyncio.to_thread(deps.admin_repo.get_category_by_id, callback_data.category_id)
+        data = await state.get_data()
+        category_id = data.get("category_id")
+        if not category_id:
+            await respond(callback, "Сначала выберите категорию.")
+            return
+        category = await asyncio.to_thread(deps.admin_repo.get_category_by_id, category_id)
         users = await asyncio.to_thread(deps.user_repo.list_users, "active")
-        entries = await asyncio.to_thread(deps.access_repo.list_acl_entries, callback_data.category_id)
+        entries = await asyncio.to_thread(deps.access_repo.list_acl_entries, category_id)
         permissions = {entry.user_id: entry.permission for entry in entries}
-        _, kb = _build_user_access_list(users, callback_data.category_id, permissions, str(category.owner_user_id) if category.owner_user_id else None, callback_data.page)
+        _, kb = _build_user_access_list(
+            users,
+            permissions,
+            str(category.owner_user_id) if category.owner_user_id else None,
+            callback_data.page,
+        )
         await respond(callback, f"Доступ к категории: {category.name}", kb)
 
     @router.callback_query(AccessCb.filter(F.action == "user"))
-    async def handle_user(callback: types.CallbackQuery, callback_data: AccessCb) -> None:
+    async def handle_user(callback: types.CallbackQuery, callback_data: AccessCb, state: FSMContext) -> None:
         if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
+            return
+        data = await state.get_data()
+        category_id = data.get("category_id")
+        if not category_id:
+            await respond(callback, "Сначала выберите категорию.")
             return
         user = await asyncio.to_thread(deps.user_repo.get_by_id, callback_data.user_id)
         if not user:
             await respond(callback, "Пользователь не найден.")
             return
-        category = await asyncio.to_thread(deps.admin_repo.get_category_by_id, callback_data.category_id)
-        entries = await asyncio.to_thread(deps.access_repo.list_acl_entries, callback_data.category_id)
+        category = await asyncio.to_thread(deps.admin_repo.get_category_by_id, category_id)
+        entries = await asyncio.to_thread(deps.access_repo.list_acl_entries, category_id)
         permissions = {entry.user_id: entry.permission for entry in entries}
         permission = permissions.get(callback_data.user_id, "no")
         locked = user.role == "admin" or (category.owner_user_id and str(category.owner_user_id) == user.id)
         info = f"@{user.username or 'unknown'}\nrole={user.role}\naccess={permission}"
         if locked:
             info += "\n(implicit access)"
-        await respond(callback, info, _build_access_actions(callback_data.category_id, callback_data.user_id, locked))
+        await respond(callback, info, _build_access_actions(category_id, callback_data.user_id, locked))
 
     @router.callback_query(AccessCb.filter(F.action == "grant"))
-    async def handle_grant(callback: types.CallbackQuery, callback_data: AccessCb) -> None:
+    async def handle_grant(callback: types.CallbackQuery, callback_data: AccessCb, state: FSMContext) -> None:
         if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
         if not callback_data.value:
             await respond(callback, "Нет permission.")
             return
+        data = await state.get_data()
+        category_id = data.get("category_id")
+        if not category_id:
+            await respond(callback, "Сначала выберите категорию.")
+            return
         await asyncio.to_thread(
             deps.access_repo.grant_access,
-            callback_data.category_id,
+            category_id,
             callback_data.user_id,
             callback_data.value,
         )
         await respond(callback, "Доступ обновлён.")
 
     @router.callback_query(AccessCb.filter(F.action == "revoke"))
-    async def handle_revoke(callback: types.CallbackQuery, callback_data: AccessCb) -> None:
+    async def handle_revoke(callback: types.CallbackQuery, callback_data: AccessCb, state: FSMContext) -> None:
         if not await _is_admin(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
+        data = await state.get_data()
+        category_id = data.get("category_id")
+        if not category_id:
+            await respond(callback, "Сначала выберите категорию.")
+            return
         await asyncio.to_thread(
             deps.access_repo.revoke_access,
-            callback_data.category_id,
+            category_id,
             callback_data.user_id,
         )
         await respond(callback, "Доступ отозван.")
