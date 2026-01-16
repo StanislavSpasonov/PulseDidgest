@@ -3,83 +3,92 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import sys
-from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from dotenv import load_dotenv
-
+from src.application.services.notifier import DebugThrottle, UserNotifier
+from src.application.use_cases.delivery_outbox import (
+    DeliveryOutboxScheduler,
+    EnqueueDeliveryOutboxUseCase,
+)
+from src.application.use_cases.deliver_instant import DeliverInstantUseCase
+from src.application.use_cases.deliver_decision import DeliverDecisionUseCase
 from src.application.use_cases.filter_message_with_gemini import (
     FilterMessageWithGeminiUseCase,
 )
 from src.application.use_cases.log_telegram_message import LogTelegramMessageUseCase
+from src.application.use_cases.process_incoming_message import (
+    IncomingMessage,
+    ProcessIncomingMessageUseCase,
+)
+from src.application.use_cases.routing_snapshot import GetActiveRoutingSnapshotUseCase
 from src.application.use_cases.store_message_and_decision import (
     StoreMessageAndDecisionUseCase,
 )
-from src.domain.entities import DecisionRecord, MessageRecord
+from src.application.use_cases.sync_categories_and_groups_from_config import (
+    SyncCategoriesAndGroupsFromConfigUseCase,
+)
 from src.infrastructure.db.engine import get_session_factory
-from src.infrastructure.db.repositories import SQLAlchemyMessageDecisionRepository
+from src.infrastructure.db.repositories import (
+    SQLAlchemyCategoryRepository,
+    SQLAlchemyCategoryAccessRepository,
+    SQLAlchemyDeliveryOutboxRepository,
+    SQLAlchemyDeliveryRepository,
+    SQLAlchemyMessageDecisionRepository,
+    SQLAlchemyUserRepository,
+    SQLAlchemyUserDeliveryRepository,
+)
+from src.infrastructure.collector.routing_cache import RoutingSnapshotCache
+from src.infrastructure.config import CollectorSettings, load_collector_settings, load_env_file
 from src.infrastructure.llm_gemini import GeminiFilterClient
-from src.infrastructure.telegram_client.collector_client import TelegramCollectorClient
+from src.infrastructure.telegram_bot import TelegramBotSender
+from src.infrastructure.telegram_client.collector_service import TelethonCollectorService
+from apps.bot.ui.reply_menu import build_menu_button_keyboard
 
-DEFAULT_SESSION_NAME = "pulsedidgest"
 DOTENV_PATH = PROJECT_ROOT / ".env"
+CATEGORIES_CONFIG = PROJECT_ROOT / "config" / "categories.yml"
 
 
-@dataclass
-class CollectorSettings:
-    api_id: int
-    api_hash: str
-    source_chat: str
-    session_name: str
-    gemini_api_key: str
-    gemini_model: str | None
+class GeminiCooldownManager:
+    """Controls cooldown periods after hitting Gemini rate limits."""
+
+    def __init__(self, cooldown_seconds: int) -> None:
+        self._cooldown_seconds = max(0, cooldown_seconds)
+        self._cooldown_until: datetime | None = None
+
+    def activate(self) -> None:
+        if self._cooldown_seconds <= 0:
+            return
+        self._cooldown_until = datetime.utcnow() + timedelta(
+            seconds=self._cooldown_seconds
+        )
+
+    def in_cooldown(self) -> bool:
+        if not self._cooldown_until:
+            return False
+        if datetime.utcnow() >= self._cooldown_until:
+            self._cooldown_until = None
+            return False
+        return True
+
+    def remaining_seconds(self) -> int:
+        if not self._cooldown_until:
+            return 0
+        remaining = (self._cooldown_until - datetime.utcnow()).total_seconds()
+        return max(0, int(remaining))
 
 
-def load_settings() -> CollectorSettings:
-    api_id = _require_env("TELEGRAM_API_ID")
-    api_hash = _require_env("TELEGRAM_API_HASH")
-    source_chat = _require_env("TELEGRAM_SOURCE_CHAT")
-    session_name = os.getenv("TELETHON_SESSION_NAME", DEFAULT_SESSION_NAME)
-    gemini_api_key = _require_env("GEMINI_API_KEY")
-    gemini_model = os.getenv("GEMINI_MODEL") or None
-    _require_env("DATABASE_URL")
-
-    try:
-        api_id_int = int(api_id)
-    except ValueError as exc:  # pragma: no cover - validation guard
-        raise ValueError("TELEGRAM_API_ID must be an integer") from exc
-
-    return CollectorSettings(
-        api_id=api_id_int,
-        api_hash=api_hash,
-        source_chat=source_chat,
-        session_name=session_name,
-        gemini_api_key=gemini_api_key,
-        gemini_model=gemini_model,
-    )
-
-
-def load_env_file() -> None:
-    load_dotenv(dotenv_path=DOTENV_PATH)
-
-
-def _require_env(var_name: str) -> str:
-    value = os.getenv(var_name)
-    if not value:
-        raise RuntimeError(f"Environment variable {var_name} is required")
-    return value
 
 
 async def run_collector(settings: CollectorSettings) -> None:
     logger = logging.getLogger("collector")
-    client = TelegramCollectorClient(
+    session_factory = get_session_factory()
+    client = TelethonCollectorService(
         api_id=settings.api_id,
         api_hash=settings.api_hash,
         session_name=settings.session_name,
@@ -95,54 +104,113 @@ async def run_collector(settings: CollectorSettings) -> None:
         gemini_client=gemini_client,
         logger=logger,
     )
-    session_factory = get_session_factory()
-    repository = SQLAlchemyMessageDecisionRepository(session_factory=session_factory)
-    store_use_case = StoreMessageAndDecisionUseCase(
-        repository=repository,
+    message_repository = SQLAlchemyMessageDecisionRepository(session_factory=session_factory)
+    category_repository = SQLAlchemyCategoryRepository(session_factory=session_factory)
+    delivery_repository = SQLAlchemyDeliveryRepository(session_factory=session_factory)
+    user_repository = SQLAlchemyUserRepository(session_factory=session_factory)
+    access_repository = SQLAlchemyCategoryAccessRepository(session_factory=session_factory)
+    user_delivery_repository = SQLAlchemyUserDeliveryRepository(session_factory=session_factory)
+
+    sync_use_case = SyncCategoriesAndGroupsFromConfigUseCase(
+        repository=category_repository,
+        config_path=CATEGORIES_CONFIG,
+        config_mode=settings.config_sync_mode,
+        default_tz=settings.default_tz,
+        logger=logger,
+    )
+    sync_use_case.execute()
+    routing_use_case = GetActiveRoutingSnapshotUseCase(
+        repository=category_repository,
+        logger=logger,
+    )
+    routing_cache = RoutingSnapshotCache(
+        use_case=routing_use_case,
+        refresh_seconds=settings.refresh_seconds,
         logger=logger,
     )
 
-    async def handle_event(event):
+    notifier: UserNotifier | None = None
+    bot_sender: TelegramBotSender | None = None
+    instant_delivery: DeliverInstantUseCase | None = None
+    deliver_decision_use_case: DeliverDecisionUseCase | None = None
+    outbox_scheduler: DeliveryOutboxScheduler | None = None
+    debug_throttle = DebugThrottle()
+
+    outbox_repo = SQLAlchemyDeliveryOutboxRepository(session_factory=session_factory)
+    outbox_use_case = EnqueueDeliveryOutboxUseCase(repository=outbox_repo, logger=logger)
+
+    if settings.bot_token:
+        bot_sender = TelegramBotSender(settings.bot_token)
+        notifier = UserNotifier(
+            user_repository=user_repository,
+            sender=bot_sender,
+            admin_chat_id=settings.admin_user_id,
+            logger=logger,
+        )
+        instant_delivery = DeliverInstantUseCase(
+            decision_repository=message_repository,
+            notifier=notifier,
+            logger=logger,
+            reply_markup_factory=build_menu_button_keyboard,
+        )
+        deliver_decision_use_case = DeliverDecisionUseCase(
+            access_repo=access_repository,
+            user_delivery_repo=user_delivery_repository,
+            instant_delivery_use_case=instant_delivery,
+            outbox_use_case=outbox_use_case,
+            logger=logger,
+        )
+        outbox_scheduler = DeliveryOutboxScheduler(
+            repository=outbox_repo,
+            notifier=notifier,
+            decision_repository=message_repository,
+            delivery_repository=delivery_repository,
+            user_repository=user_repository,
+            user_delivery_repository=user_delivery_repository,
+            tick_seconds=settings.delivery_tick_seconds,
+            logger=logger,
+            reply_markup_factory=build_menu_button_keyboard,
+        )
+        outbox_scheduler.start()
+    else:
+        logger.info("TELEGRAM_BOT_TOKEN not configured; delivery and debug notifications disabled")
+
+    store_use_case = StoreMessageAndDecisionUseCase(
+        repository=message_repository,
+        logger=logger,
+    )
+    cooldown = GeminiCooldownManager(settings.gemini_cooldown_seconds)
+    process_use_case = ProcessIncomingMessageUseCase(
+        filter_use_case=filter_use_case,
+        store_use_case=store_use_case,
+        instant_delivery_use_case=instant_delivery,
+        outbox_use_case=outbox_use_case,
+        deliver_decision_use_case=deliver_decision_use_case if settings.bot_token else None,
+        notifier=notifier,
+        debug_throttle=debug_throttle,
+        cooldown=cooldown,
+        logger=logger,
+    )
+
+    async def handle_event(event: IncomingMessage) -> None:
         await log_use_case.handle(event)
-        decision = await filter_use_case.handle(event)
-        if decision is None:
-            return
-        await persist_decision(event, decision)
+        snapshot = routing_cache.get_snapshot()
+        await process_use_case.handle(event, snapshot)
 
-    async def persist_decision(event, decision):
-        message = getattr(event, "message", None)
-        if message is None:
-            logger.warning("Persistence skipped: event without message %s", event)
-            return
-
-        chat_id = getattr(event, "chat_id", None)
-        message_id = getattr(message, "id", None)
-        message_date = getattr(message, "date", None) or datetime.utcnow()
-        if chat_id is None or message_id is None:
-            logger.warning(
-                "Persistence skipped: missing chat_id/message_id (chat=%s, message=%s)",
-                chat_id,
-                message_id,
+    try:
+        await routing_cache.start()
+        if settings.source_chat_override:
+            logger.info(
+                "Collector running in single-chat override mode: %s",
+                settings.source_chat_override,
             )
-            return
-
-        message_record = MessageRecord(
-            source_chat_id=int(chat_id),
-            source_message_id=int(message_id),
-            date=message_date,
-            text=getattr(message, "message", None),
-        )
-        decision_record = DecisionRecord(
-            model=decision.model,
-            prompt_name=decision.prompt_name,
-            prompt_version=decision.prompt_version,
-            passed=decision.passed,
-            score=decision.score,
-            reason=decision.reason,
-        )
-        await store_use_case.handle(message_record, decision_record)
-
-    await client.run(settings.source_chat, handle_event)
+        await client.run(handle_event, chat_filter=settings.source_chat_override)
+    finally:
+        await routing_cache.stop()
+        if outbox_scheduler is not None:
+            await outbox_scheduler.stop()
+        if bot_sender is not None:
+            await bot_sender.close()
 
 
 def main() -> None:
@@ -150,8 +218,8 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
-    load_env_file()
-    settings = load_settings()
+    load_env_file(DOTENV_PATH)
+    settings = load_collector_settings()
     try:
         asyncio.run(run_collector(settings))
     except KeyboardInterrupt:  # pragma: no cover - graceful exit

@@ -2,7 +2,13 @@
 
 from .engine import get_engine, get_session, get_session_factory
 from .models import Base
-from .repositories import SQLAlchemyMessageDecisionRepository
+from .repositories import (
+    SQLAlchemyMessageDecisionRepository,
+    SQLAlchemyCategoryRepository,
+    SQLAlchemyUserRepository,
+    SQLAlchemyDeliveryRepository,
+    SQLAlchemyAdminRepository,
+)
 
 __all__ = [
     "Base",
@@ -10,4 +16,8 @@ __all__ = [
     "get_session",
     "get_session_factory",
     "SQLAlchemyMessageDecisionRepository",
+    "SQLAlchemyCategoryRepository",
+    "SQLAlchemyUserRepository",
+    "SQLAlchemyDeliveryRepository",
+    "SQLAlchemyAdminRepository",
 ]
