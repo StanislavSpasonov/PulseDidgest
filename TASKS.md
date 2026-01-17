@@ -7,6 +7,7 @@
 - Epic: Multi-user (RBAC/ACL + персональная доставка + feedback/inbox)
 
 ## Done
+- Fix: apps.auth NameError при запуске (порядок функций)
 - Auth: повторный ввод телефона/кода при ошибке Telethon
 - Fix: единый резолвер Telethon session + auth команда + диагностика + тесты
 - Fix: общий резолв Telethon session path + диагностика старта + тесты

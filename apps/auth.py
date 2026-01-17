@@ -41,10 +41,6 @@ async def main() -> None:
         await client.disconnect()
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
-
-
 async def _authorize_with_retries(client: TelegramClient, logger: logging.Logger) -> None:
     while True:
         phone = await asyncio.to_thread(input, "Please enter your phone (e.g. +491234567890): ")
@@ -83,3 +79,7 @@ async def _authorize_with_retries(client: TelegramClient, logger: logging.Logger
                 continue
             await client.sign_in(password=password)
             return
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
