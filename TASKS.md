@@ -7,6 +7,7 @@
 - Epic: Multi-user (RBAC/ACL + персональная доставка + feedback/inbox)
 
 ## Done
+- Fix: UI edit игнорирует ошибку "message is not modified" от Telegram
 - Audit: зафиксированы текущие таблицы, команды бота, admin gate и user_id (см. PROJECT_MEMO.md)
 - Users: добавлены role/status + /start gating + bootstrap admin
 - ACL: owner_user_id + category_acl + UI выдачи/отзыва доступа
@@ -50,4 +51,4 @@
 - Epic: MVP hardening (dynamic routing, delivery outbox/scheduler, formatting, UX, tests, docs)
 
 ## Next
-- Проверить настройку доставки пользователем (instant/digest/presets/custom)
+- Проверить авторизацию Telethon сессии на сервере (collector auth)

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Iterable, Optional
 
 from aiogram import types
+from aiogram.exceptions import TelegramBadRequest
 from src.application.use_cases.manage_groups_telethon import (
     AddGroupByNameUseCase,
     ListUserChatsUseCase,
@@ -100,7 +101,11 @@ async def respond(
 ) -> None:
     if isinstance(event, types.CallbackQuery):
         if event.message:
-            await event.message.edit_text(text, reply_markup=reply_markup)
+            try:
+                await event.message.edit_text(text, reply_markup=reply_markup)
+            except TelegramBadRequest as exc:
+                if "message is not modified" not in str(exc).lower():
+                    raise
         await event.answer()
     else:
         await event.answer(text, reply_markup=reply_markup)
