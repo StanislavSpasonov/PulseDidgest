@@ -44,7 +44,12 @@ from src.infrastructure.db.repositories import (
     SQLAlchemyUserDeliveryRepository,
 )
 from src.infrastructure.collector.routing_cache import RoutingSnapshotCache
-from src.infrastructure.config import CollectorSettings, load_collector_settings, load_env_file
+from src.infrastructure.config import (
+    CollectorSettings,
+    load_collector_settings,
+    load_env_file,
+    log_telethon_session_diagnostics,
+)
 from src.infrastructure.llm_gemini import GeminiFilterClient
 from src.infrastructure.telegram_bot import TelegramBotSender
 from src.infrastructure.telegram_client.collector_service import TelethonCollectorService
@@ -87,6 +92,7 @@ class GeminiCooldownManager:
 
 async def run_collector(settings: CollectorSettings) -> None:
     logger = logging.getLogger("collector")
+    log_telethon_session_diagnostics(logger, settings.session_name, "collector")
     session_factory = get_session_factory()
     client = TelethonCollectorService(
         api_id=settings.api_id,

@@ -7,6 +7,7 @@
 - Epic: Multi-user (RBAC/ACL + персональная доставка + feedback/inbox)
 
 ## Done
+- Fix: общий резолв Telethon session path + диагностика старта + тесты
 - Fix: безопасное редактирование UI сообщений + обработка Telethon unauthorized + путь сессии
 - Fix: UI edit игнорирует ошибку "message is not modified" от Telegram
 - Audit: зафиксированы текущие таблицы, команды бота, admin gate и user_id (см. PROJECT_MEMO.md)
@@ -52,4 +53,4 @@
 - Epic: MVP hardening (dynamic routing, delivery outbox/scheduler, formatting, UX, tests, docs)
 
 ## Next
-- Проверить авторизацию Telethon сессии на сервере и корректность пути/volume
+- Smoke: пересоздать сессию и проверить bot.ui/collector на одном пути
