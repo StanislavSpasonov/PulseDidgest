@@ -7,6 +7,7 @@
 - Epic: Multi-user (RBAC/ACL + персональная доставка + feedback/inbox)
 
 ## Done
+- Auth: повторный ввод телефона/кода при ошибке Telethon
 - Fix: единый резолвер Telethon session + auth команда + диагностика + тесты
 - Fix: общий резолв Telethon session path + диагностика старта + тесты
 - Fix: безопасное редактирование UI сообщений + обработка Telethon unauthorized + путь сессии
