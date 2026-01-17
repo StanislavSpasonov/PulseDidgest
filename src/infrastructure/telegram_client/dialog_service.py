@@ -31,7 +31,7 @@ class TelethonDialogService:
         await client.connect()
         try:
             if not await client.is_user_authorized():
-                raise RuntimeError(
+                raise TelethonUnauthorizedError(
                     "Telethon session is not authorized. Run the collector once to authenticate."
                 )
             dialogs = await client.get_dialogs(limit=limit)
@@ -59,3 +59,7 @@ class TelethonDialogService:
             return chats
         finally:
             await client.disconnect()
+
+
+class TelethonUnauthorizedError(RuntimeError):
+    """Raised when the Telethon session is missing or not authorized."""

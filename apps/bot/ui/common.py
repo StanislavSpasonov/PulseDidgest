@@ -101,14 +101,43 @@ async def respond(
 ) -> None:
     if isinstance(event, types.CallbackQuery):
         if event.message:
-            try:
-                await event.message.edit_text(text, reply_markup=reply_markup)
-            except TelegramBadRequest as exc:
-                if "message is not modified" not in str(exc).lower():
-                    raise
+            await safe_edit_text(event.message, text, reply_markup=reply_markup)
         await event.answer()
     else:
         await event.answer(text, reply_markup=reply_markup)
+
+
+def _normalize_markup(markup: Optional[types.InlineKeyboardMarkup]) -> Optional[dict]:
+    if markup is None:
+        return None
+    if hasattr(markup, "model_dump"):
+        return markup.model_dump(exclude_none=True)
+    if hasattr(markup, "to_python"):
+        return markup.to_python()
+    return {"value": markup}
+
+
+def _is_same_content(
+    message: types.Message, text: str, reply_markup: Optional[types.InlineKeyboardMarkup]
+) -> bool:
+    current_text = message.text or ""
+    if current_text != (text or ""):
+        return False
+    return _normalize_markup(message.reply_markup) == _normalize_markup(reply_markup)
+
+
+async def safe_edit_text(
+    message: types.Message,
+    text: str,
+    reply_markup: Optional[types.InlineKeyboardMarkup] = None,
+) -> None:
+    if _is_same_content(message, text, reply_markup):
+        return
+    try:
+        await message.edit_text(text, reply_markup=reply_markup)
+    except TelegramBadRequest as exc:
+        if "message is not modified" not in str(exc).lower():
+            raise
 
 
 def build_text_list(lines: Iterable[str], empty_text: str) -> str:

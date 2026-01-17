@@ -54,6 +54,7 @@ def load_collector_settings() -> CollectorSettings:
         "COLLECTOR_TELETHON_SESSION_NAME",
         os.getenv("TELETHON_SESSION_NAME", DEFAULT_SESSION_NAME),
     )
+    session_name = _resolve_session_name(session_name)
     gemini_api_key = _require_env("GEMINI_API_KEY")
     gemini_model = os.getenv("GEMINI_MODEL") or None
     cooldown_seconds = _get_int_env("GEMINI_COOLDOWN_SECONDS", 60, min_value=0)
@@ -98,6 +99,7 @@ def load_bot_settings() -> BotSettings:
             "TELEGRAM_API_ID and TELEGRAM_API_HASH are required for Telethon-based group management"
         )
     session_name = os.getenv("TELETHON_SESSION_NAME", DEFAULT_SESSION_NAME)
+    session_name = _resolve_session_name(session_name)
     telethon_dialog_limit = _get_int_env("TELETHON_DIALOGS_LIMIT", 200, min_value=1)
     gemini_model = os.getenv("GEMINI_MODEL", "models/gemini-flash-latest")
     gemini_cooldown_seconds = _get_int_env("GEMINI_COOLDOWN_SECONDS", 60, min_value=0)
@@ -141,6 +143,16 @@ def _get_int_env(var_name: str, default: int, min_value: int | None = None) -> i
     if min_value is not None:
         return max(min_value, value)
     return value
+
+
+def _resolve_session_name(session_name: str) -> str:
+    session_path = os.getenv("TELETHON_SESSION_PATH")
+    if not session_path:
+        return session_name
+    path = Path(session_path)
+    if path.suffix:
+        return str(path)
+    return str(path / session_name)
 
 
 def _get_optional_int_env(var_name: str) -> int | None:

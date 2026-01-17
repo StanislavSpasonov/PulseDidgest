@@ -35,7 +35,10 @@ from src.infrastructure.db.repositories import (
     SQLAlchemyUserRepository,
     SQLAlchemyUserDeliveryRepository,
 )
-from src.infrastructure.telegram_client.dialog_service import TelethonDialogService
+from src.infrastructure.telegram_client.dialog_service import (
+    TelethonDialogService,
+    TelethonUnauthorizedError,
+)
 from apps.bot.routers import (
     ui_access,
     ui_categories,
@@ -346,6 +349,11 @@ async def main() -> None:
             return
         try:
             chats = await list_chats_use_case.execute(limit=telethon_dialog_limit)
+        except TelethonUnauthorizedError:
+            await message.answer(
+                "Telethon не авторизован. Запустите collector один раз для авторизации."
+            )
+            return
         except Exception as exc:
             await message.answer(f"Failed to fetch chats: {exc}")
             return
@@ -391,6 +399,10 @@ async def main() -> None:
         query = parts[1].strip()
         try:
             chat = await add_group_use_case.execute(query)
+        except TelethonUnauthorizedError:
+            await message.answer(
+                "Telethon не авторизован. Запустите collector один раз для авторизации."
+            )
         except GroupNotFoundError:
             await message.answer("Group not found. Run /groups_my for a list of available chats.")
         except MultipleGroupsFoundError as exc:

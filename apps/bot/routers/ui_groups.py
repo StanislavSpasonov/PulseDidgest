@@ -11,6 +11,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from apps.bot.ui.callbacks import GroupCb, LinkCb, NavCb
 from apps.bot.ui.common import UiDeps, fetch_user, format_chat_line, is_admin, is_power, respond
 from apps.bot.ui.list_keyboard import build_one_column_list
+from src.infrastructure.telegram_client.dialog_service import TelethonUnauthorizedError
 
 
 class GroupSearchState(StatesGroup):
@@ -125,6 +126,10 @@ def _build_group_detail_kb(chat_id: int) -> types.InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def _telethon_auth_required_text() -> str:
+    return "Telethon не авторизован. Запустите collector один раз для авторизации."
+
+
 def build_router(deps: UiDeps) -> Router:
     router = Router()
 
@@ -148,6 +153,10 @@ def build_router(deps: UiDeps) -> Router:
             return
         try:
             chats = await deps.list_chats_use_case.execute(limit=deps.telethon_dialog_limit)
+        except TelethonUnauthorizedError as exc:
+            deps.logger.warning("Telethon not authorized: %s", exc)
+            await respond(callback, _telethon_auth_required_text())
+            return
         except Exception as exc:
             deps.logger.exception("Telethon list failed: %s", exc)
             await respond(callback, f"Не удалось получить список чатов: {exc}")
@@ -200,6 +209,10 @@ def build_router(deps: UiDeps) -> Router:
             chats = await deps.search_chats_use_case.execute(
                 query, limit=deps.telethon_dialog_limit
             )
+        except TelethonUnauthorizedError as exc:
+            deps.logger.warning("Telethon not authorized: %s", exc)
+            await message.answer(_telethon_auth_required_text())
+            return
         except Exception as exc:
             deps.logger.exception("Telethon search failed: %s", exc)
             await message.answer(f"Не удалось выполнить поиск: {exc}")
@@ -229,6 +242,10 @@ def build_router(deps: UiDeps) -> Router:
             chats = await deps.search_chats_use_case.execute(
                 query, limit=deps.telethon_dialog_limit
             )
+        except TelethonUnauthorizedError as exc:
+            deps.logger.warning("Telethon not authorized: %s", exc)
+            await respond(callback, _telethon_auth_required_text())
+            return
         except Exception as exc:
             deps.logger.exception("Telethon search failed: %s", exc)
             await respond(callback, f"Не удалось выполнить поиск: {exc}")
@@ -252,6 +269,10 @@ def build_router(deps: UiDeps) -> Router:
             return
         try:
             chats = await deps.list_chats_use_case.execute(limit=deps.telethon_dialog_limit)
+        except TelethonUnauthorizedError as exc:
+            deps.logger.warning("Telethon not authorized: %s", exc)
+            await respond(callback, _telethon_auth_required_text())
+            return
         except Exception as exc:
             deps.logger.exception("Telethon list failed: %s", exc)
             await respond(callback, f"Не удалось получить список чатов: {exc}")

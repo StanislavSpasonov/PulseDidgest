@@ -114,6 +114,7 @@ Collector использует `DATABASE_URL` во время запуска и 
 - `TELEGRAM_API_HASH` — соответствующий API hash
 - `TELEGRAM_SOURCE_CHAT` — optional legacy override (single source chat for dev)
 - `TELETHON_SESSION_NAME` — имя файла сессии (опционально, по умолчанию `pulsedidgest`)
+- `TELETHON_SESSION_PATH` — путь к файлу или каталогу для Telethon-сессии (если каталог, имя берётся из `TELETHON_SESSION_NAME`)
 - `COLLECTOR_TELETHON_SESSION_NAME` — отдельная сессия для collector (рекомендуется, чтобы избежать SQLite lock)
 - `TELEGRAM_BOT_TOKEN` — токен бота для /start и instant-доставки
 - `TELEGRAM_ADMIN_USER_ID` — ID администратора (для debug/бот-команд, bootstrap роли)
@@ -126,6 +127,8 @@ Collector использует `DATABASE_URL` во время запуска и 
 - `DELIVERY_TICK_SECONDS` — частота проверки digest-расписаний (по умолчанию 60 секунд)
 - `COLLECTOR_REFRESH_SECONDS` — частота обновления маршрутизации из БД (по умолчанию 30 секунд)
 - `DATABASE_URL` — строка подключения к PostgreSQL (например `postgresql+psycopg://user:password@localhost:5432/pulsedidgest`)
+
+Если используете Docker для запуска приложения, смонтируйте путь из `TELETHON_SESSION_PATH` как volume, чтобы сессия не терялась при перезапуске.
 
 ## Dev: setup + run + tests
 
