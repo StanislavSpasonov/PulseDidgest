@@ -357,7 +357,7 @@ async def main() -> None:
             chats = await list_chats_use_case.execute(limit=telethon_dialog_limit)
         except TelethonUnauthorizedError:
             await message.answer(
-                "Telethon не авторизован. Запустите collector один раз для авторизации."
+                "Telethon не авторизован. Запустите: python -m apps.auth"
             )
             return
         except Exception as exc:
@@ -407,7 +407,7 @@ async def main() -> None:
             chat = await add_group_use_case.execute(query)
         except TelethonUnauthorizedError:
             await message.answer(
-                "Telethon не авторизован. Запустите collector один раз для авторизации."
+                "Telethon не авторизован. Запустите: python -m apps.auth"
             )
         except GroupNotFoundError:
             await message.answer("Group not found. Run /groups_my for a list of available chats.")

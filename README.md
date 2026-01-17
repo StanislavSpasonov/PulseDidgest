@@ -109,6 +109,18 @@ Collector использует `DATABASE_URL` во время запуска и 
 
 Если бот не находит чат, сначала вызовите `/groups_my` и скопируйте нужное название/username.
 
+### Telethon authorization (one-time)
+
+Рекомендуемый путь сессии: `TELETHON_SESSION=.sessions/pulsedidgest` и один общий файл для bot + collector.
+
+Одноразовая авторизация (на сервере, вручную):
+
+```bash
+python -m apps.auth
+```
+
+После успешной авторизации systemd может запускать `python -m apps.main` без интерактива.
+
 ### Переменные окружения
 - `TELEGRAM_API_ID` — API ID Telegram (integer)
 - `TELEGRAM_API_HASH` — соответствующий API hash
@@ -118,6 +130,8 @@ Collector использует `DATABASE_URL` во время запуска и 
 - `TELETHON_SESSION_PATH` — legacy алиас для `TELETHON_SESSION`
 - `COLLECTOR_TELETHON_SESSION_NAME` — отдельная сессия для collector (если используете, задайте `UI_TELETHON_SESSION` для bot)
 - `UI_TELETHON_SESSION` — путь к Telethon-сессии для bot UI (опционально)
+
+Если `TELETHON_SESSION` указывает на директорию, добавьте `/` в конце или используйте путь вроде `.sessions`, чтобы резолвер однозначно собрал `<dir>/<TELETHON_SESSION_NAME>`.
 - `TELEGRAM_BOT_TOKEN` — токен бота для /start и instant-доставки
 - `TELEGRAM_ADMIN_USER_ID` — ID администратора (для debug/бот-команд, bootstrap роли)
 - `ADMIN_TELEGRAM_ID` — алиас для `TELEGRAM_ADMIN_USER_ID`

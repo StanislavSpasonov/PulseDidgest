@@ -7,6 +7,8 @@ from typing import Awaitable, Callable, Optional
 
 from telethon import TelegramClient, events
 
+from src.infrastructure.telegram.session_resolver import log_telethon_session_diagnostics
+
 from src.application.use_cases.process_incoming_message import IncomingMessage
 
 IncomingHandler = Callable[[IncomingMessage], Awaitable[None]]
@@ -20,10 +22,12 @@ class TelethonCollectorService:
         session_name: str,
         logger: Optional[logging.Logger] = None,
     ) -> None:
+        self._session_name = session_name
         self._client = TelegramClient(session_name, api_id, api_hash)
         self._logger = logger or logging.getLogger("collector.telethon")
 
     async def run(self, on_message: IncomingHandler, chat_filter=None) -> None:
+        log_telethon_session_diagnostics(self._logger, self._session_name, "collector/use")
         @self._client.on(events.NewMessage(chats=chat_filter))
         async def _listener(event):  # type: ignore[unused-variable]
             message = getattr(event, "message", None)
