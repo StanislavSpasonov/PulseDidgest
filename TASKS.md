@@ -7,6 +7,7 @@
 - Epic: Multi-user (RBAC/ACL + персональная доставка + feedback/inbox)
 
 ## Done
+- Ops: systemd unit template + deploy script + workflow update + env diagnostics + README deploy notes
 - Fix: apps.auth NameError при запуске (порядок функций)
 - Auth: повторный ввод телефона/кода при ошибке Telethon
 - Fix: единый резолвер Telethon session + auth команда + диагностика + тесты
@@ -56,4 +57,4 @@
 - Epic: MVP hardening (dynamic routing, delivery outbox/scheduler, formatting, UX, tests, docs)
 
 ## Next
-- Smoke: пересоздать Telethon session и проверить bot.ui/collector после auth команды
+- Smoke: задеплоить на сервер, проверить systemd env/логи и Telethon session
