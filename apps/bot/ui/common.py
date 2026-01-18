@@ -98,13 +98,19 @@ async def respond(
     event: types.CallbackQuery | types.Message,
     text: str,
     reply_markup: Optional[types.InlineKeyboardMarkup] = None,
+    parse_mode: Optional[str] = None,
 ) -> None:
     if isinstance(event, types.CallbackQuery):
         if event.message:
-            await safe_edit_text(event.message, text, reply_markup=reply_markup)
+            await safe_edit_text(
+                event.message,
+                text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode,
+            )
         await event.answer()
     else:
-        await event.answer(text, reply_markup=reply_markup)
+        await event.answer(text, reply_markup=reply_markup, parse_mode=parse_mode)
 
 
 def _normalize_markup(markup: Optional[types.InlineKeyboardMarkup]) -> Optional[dict]:
@@ -130,11 +136,16 @@ async def safe_edit_text(
     message: types.Message,
     text: str,
     reply_markup: Optional[types.InlineKeyboardMarkup] = None,
+    parse_mode: Optional[str] = None,
 ) -> None:
     if _is_same_content(message, text, reply_markup):
         return
     try:
-        await message.edit_text(text, reply_markup=reply_markup)
+        await message.edit_text(
+            text,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode,
+        )
     except TelegramBadRequest as exc:
         if "message is not modified" not in str(exc).lower():
             raise

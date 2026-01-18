@@ -11,6 +11,8 @@
 - Ops: bootstrap git pull before deploy script in workflow
 - Docs: обновлены инструкции README по запуску и Telethon авторизации
 - Docs: обновлены CONTRIBUTING и SPEC под актуальный git/deploy и статус MVP
+- Release: merge deploy into dev
+- UI: категория — читабельные заголовки, русский текст, формат источников
 - Fix: apps.auth NameError при запуске (порядок функций)
 - Auth: повторный ввод телефона/кода при ошибке Telethon
 - Fix: единый резолвер Telethon session + auth команда + диагностика + тесты
