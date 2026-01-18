@@ -9,6 +9,7 @@ from telethon.tl.types import Channel, Chat
 from telethon.utils import get_peer_id
 
 from src.domain.entities import TelegramChatInfo
+from src.infrastructure.telegram.session_resolver import log_telethon_session_diagnostics
 
 
 class TelethonDialogService:
@@ -27,12 +28,13 @@ class TelethonDialogService:
         self._logger = logger or logging.getLogger("telethon.dialogs")
 
     async def list_user_chats(self, limit: Optional[int] = None) -> List[TelegramChatInfo]:
+        log_telethon_session_diagnostics(self._logger, self._session_name, "bot.ui/use")
         client = TelegramClient(self._session_name, self._api_id, self._api_hash)
         await client.connect()
         try:
             if not await client.is_user_authorized():
                 raise TelethonUnauthorizedError(
-                    "Telethon session is not authorized. Run the collector once to authenticate."
+                    "Telethon session is not authorized."
                 )
             dialogs = await client.get_dialogs(limit=limit)
             chats: List[TelegramChatInfo] = []

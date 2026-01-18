@@ -127,7 +127,7 @@ def _build_group_detail_kb(chat_id: int) -> types.InlineKeyboardMarkup:
 
 
 def _telethon_auth_required_text() -> str:
-    return "Telethon не авторизован. Запустите collector один раз для авторизации."
+    return "Telethon не авторизован. Запустите: python -m apps.auth"
 
 
 def build_router(deps: UiDeps) -> Router:

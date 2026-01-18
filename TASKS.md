@@ -7,6 +7,14 @@
 - Epic: Multi-user (RBAC/ACL + персональная доставка + feedback/inbox)
 
 ## Done
+- Ops: systemd unit template + deploy script + workflow update + env diagnostics + README deploy notes
+- Ops: bootstrap git pull before deploy script in workflow
+- Docs: обновлены инструкции README по запуску и Telethon авторизации
+- Docs: обновлены CONTRIBUTING и SPEC под актуальный git/deploy и статус MVP
+- Fix: apps.auth NameError при запуске (порядок функций)
+- Auth: повторный ввод телефона/кода при ошибке Telethon
+- Fix: единый резолвер Telethon session + auth команда + диагностика + тесты
+- Fix: общий резолв Telethon session path + диагностика старта + тесты
 - Fix: безопасное редактирование UI сообщений + обработка Telethon unauthorized + путь сессии
 - Fix: UI edit игнорирует ошибку "message is not modified" от Telegram
 - Audit: зафиксированы текущие таблицы, команды бота, admin gate и user_id (см. PROJECT_MEMO.md)
@@ -52,4 +60,5 @@
 - Epic: MVP hardening (dynamic routing, delivery outbox/scheduler, formatting, UX, tests, docs)
 
 ## Next
-- Проверить авторизацию Telethon сессии на сервере и корректность пути/volume
+- Smoke: задеплоить на сервер, проверить systemd env/логи и Telethon session
+- CD: перезапустить workflow deploy после обновления скрипта

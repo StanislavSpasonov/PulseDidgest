@@ -10,7 +10,7 @@ Early-stage MVP.
 2. Установите зависимости: `pip install -r requirements.txt`.
 3. Запустите collector командой `python -m apps.collector.main` (или `python -m apps.main`, чтобы поднять bot + collector вместе).
 
-Collector автоматически загружает `.env` из корня проекта (python-dotenv), берёт `TELETHON_SESSION_NAME` из env (или использует `pulsedidgest` по умолчанию), логирует каждое новое сообщение и отправляет текст в Gemini для классификации. Маршрутизация берётся из БД и обновляется каждые `COLLECTOR_REFRESH_SECONDS` (по умолчанию 30 сек). В логах видно, какую модель использует LLM, и решение сохраняется в PostgreSQL.
+Collector автоматически загружает `.env` из корня проекта (python-dotenv), берёт путь `TELETHON_SESSION` (или `TELETHON_SESSION_NAME` по умолчанию), логирует каждое новое сообщение и отправляет текст в Gemini для классификации. Маршрутизация берётся из БД и обновляется каждые `COLLECTOR_REFRESH_SECONDS` (по умолчанию 30 сек). В логах видно, какую модель использует LLM, и решение сохраняется в PostgreSQL.
 
 ## Gemini Filter (MVP)
 
@@ -109,13 +109,38 @@ Collector использует `DATABASE_URL` во время запуска и 
 
 Если бот не находит чат, сначала вызовите `/groups_my` и скопируйте нужное название/username.
 
+### Telethon authorization (one-time)
+
+Рекомендуемый путь сессии: `TELETHON_SESSION=.sessions/pulsedidgest` и один общий файл для bot + collector.
+
+Перед авторизацией проверьте `.env`:
+- `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`
+- `TELETHON_SESSION` (например `.sessions/pulsedidgest`)
+
+Одноразовая авторизация (на сервере, вручную):
+
+```bash
+cd /home/stanislavspasonov/apps/PulseDidgest
+source .venv/bin/activate
+mkdir -p /home/stanislavspasonov/apps/PulseDidgest/.sessions
+python -m apps.auth
+```
+
+Введите номер телефона, код из Telegram (и пароль 2FA, если включен).
+Файл сессии появится по пути: `/home/stanislavspasonov/apps/PulseDidgest/.sessions/pulsedidgest.session`.
+После успешной авторизации systemd может запускать `python -m apps.main` без интерактива.
+
 ### Переменные окружения
 - `TELEGRAM_API_ID` — API ID Telegram (integer)
 - `TELEGRAM_API_HASH` — соответствующий API hash
 - `TELEGRAM_SOURCE_CHAT` — optional legacy override (single source chat for dev)
-- `TELETHON_SESSION_NAME` — имя файла сессии (опционально, по умолчанию `pulsedidgest`)
-- `TELETHON_SESSION_PATH` — путь к файлу или каталогу для Telethon-сессии (если каталог, имя берётся из `TELETHON_SESSION_NAME`)
-- `COLLECTOR_TELETHON_SESSION_NAME` — отдельная сессия для collector (рекомендуется, чтобы избежать SQLite lock)
+- `TELETHON_SESSION` — путь к Telethon-сессии (рекомендуемый вариант; используйте один и тот же для bot + collector)
+- `TELETHON_SESSION_NAME` — имя сессии (используется, если `TELETHON_SESSION` указывает на директорию)
+- `TELETHON_SESSION_PATH` — legacy алиас для `TELETHON_SESSION`
+- `COLLECTOR_TELETHON_SESSION_NAME` — отдельная сессия для collector (если используете, задайте `UI_TELETHON_SESSION` для bot)
+- `UI_TELETHON_SESSION` — путь к Telethon-сессии для bot UI (опционально)
+
+Если `TELETHON_SESSION` указывает на директорию, добавьте `/` в конце или используйте путь вроде `.sessions`, чтобы резолвер однозначно собрал `<dir>/<TELETHON_SESSION_NAME>`.
 - `TELEGRAM_BOT_TOKEN` — токен бота для /start и instant-доставки
 - `TELEGRAM_ADMIN_USER_ID` — ID администратора (для debug/бот-команд, bootstrap роли)
 - `ADMIN_TELEGRAM_ID` — алиас для `TELEGRAM_ADMIN_USER_ID`
@@ -128,7 +153,18 @@ Collector использует `DATABASE_URL` во время запуска и 
 - `COLLECTOR_REFRESH_SECONDS` — частота обновления маршрутизации из БД (по умолчанию 30 секунд)
 - `DATABASE_URL` — строка подключения к PostgreSQL (например `postgresql+psycopg://user:password@localhost:5432/pulsedidgest`)
 
-Если используете Docker для запуска приложения, смонтируйте путь из `TELETHON_SESSION_PATH` как volume, чтобы сессия не терялась при перезапуске.
+Если используете Docker для запуска приложения, смонтируйте путь из `TELETHON_SESSION` как volume, чтобы сессия не терялась при перезапуске.
+
+Рекомендуемый вариант без двусмысленностей: `TELETHON_SESSION=.sessions/pulsedidgest` и единый путь для bot + collector.
+
+## Production deploy on server
+
+- Путь приложения: `/home/stanislavspasonov/apps/PulseDidgest`
+- `.env`: `/home/stanislavspasonov/apps/PulseDidgest/.env`
+- Деплой вручную: `bash /home/stanislavspasonov/apps/PulseDidgest/scripts/deploy.sh`
+- Перезапуск сервиса: `sudo systemctl restart pulsedidgest`
+- Статус: `systemctl status pulsedidgest --no-pager`
+- Логи: `journalctl -u pulsedidgest -f`
 
 ## Dev: setup + run + tests
 

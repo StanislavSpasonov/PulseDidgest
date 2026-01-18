@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from src.infrastructure.config import load_bot_settings, load_collector_settings
+from src.infrastructure.telegram.session_resolver import resolve_telethon_session_path
 
 
 def test_load_bot_settings_parses_required_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -60,3 +63,18 @@ def test_load_bot_settings_missing_telethon_id(monkeypatch: pytest.MonkeyPatch) 
 
     with pytest.raises(RuntimeError):
         load_bot_settings()
+
+
+def test_resolve_telethon_session_path_dir_with_name() -> None:
+    resolved = resolve_telethon_session_path(".sessions", "pulsedidgest")
+    assert resolved == str((Path(".sessions") / "pulsedidgest").resolve())
+
+
+def test_resolve_telethon_session_path_full_path_with_name() -> None:
+    resolved = resolve_telethon_session_path(".sessions/pulsedidgest-collector", "pulsedidgest")
+    assert resolved == str(Path(".sessions/pulsedidgest-collector").resolve())
+
+
+def test_resolve_telethon_session_path_defaults() -> None:
+    resolved = resolve_telethon_session_path(None, None, default_name="pulsedidgest")
+    assert resolved == str((Path(".sessions") / "pulsedidgest").resolve())

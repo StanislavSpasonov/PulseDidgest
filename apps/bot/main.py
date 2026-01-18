@@ -16,7 +16,11 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from src.infrastructure.config import load_bot_settings, load_env_file
+from src.infrastructure.config import (
+    load_bot_settings,
+    load_env_file,
+    log_telethon_session_diagnostics,
+)
 
 from src.application.use_cases.manage_groups_telethon import (
     AddGroupByNameUseCase,
@@ -78,6 +82,8 @@ async def main() -> None:
     telethon_api_hash = settings.telethon_api_hash
     session_name = settings.session_name
     telethon_dialog_limit = settings.telethon_dialog_limit
+    ui_logger = logging.getLogger("bot.ui")
+    log_telethon_session_diagnostics(ui_logger, session_name, "bot.ui")
 
     bot = Bot(token=token)
     dp = Dispatcher(storage=MemoryStorage())
@@ -121,7 +127,7 @@ async def main() -> None:
             "CONFIG_SYNC_MODE": settings.config_sync_mode,
             "DELIVERY_TICK_SECONDS": str(settings.delivery_tick_seconds),
         },
-        logger=logging.getLogger("bot.ui"),
+        logger=ui_logger,
     )
     dp.include_router(ui_menu.build_router(ui_deps))
     dp.include_router(ui_categories.build_router(ui_deps))
@@ -351,7 +357,7 @@ async def main() -> None:
             chats = await list_chats_use_case.execute(limit=telethon_dialog_limit)
         except TelethonUnauthorizedError:
             await message.answer(
-                "Telethon не авторизован. Запустите collector один раз для авторизации."
+                "Telethon не авторизован. Запустите: python -m apps.auth"
             )
             return
         except Exception as exc:
@@ -401,7 +407,7 @@ async def main() -> None:
             chat = await add_group_use_case.execute(query)
         except TelethonUnauthorizedError:
             await message.answer(
-                "Telethon не авторизован. Запустите collector один раз для авторизации."
+                "Telethon не авторизован. Запустите: python -m apps.auth"
             )
         except GroupNotFoundError:
             await message.answer("Group not found. Run /groups_my for a list of available chats.")

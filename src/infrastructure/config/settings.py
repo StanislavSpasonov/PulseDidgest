@@ -7,6 +7,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from src.infrastructure.telegram.session_resolver import resolve_telethon_session_path
+
 DEFAULT_SESSION_NAME = "pulsedidgest"
 
 
@@ -42,6 +44,13 @@ class BotSettings:
     delivery_tick_seconds: int
 
 
+@dataclass(frozen=True)
+class TelethonAuthSettings:
+    api_id: int
+    api_hash: str
+    session_name: str
+
+
 def load_env_file(dotenv_path: Path) -> None:
     load_dotenv(dotenv_path=dotenv_path)
 
@@ -50,11 +59,14 @@ def load_collector_settings() -> CollectorSettings:
     api_id = _require_env("TELEGRAM_API_ID")
     api_hash = _require_env("TELEGRAM_API_HASH")
     source_chat = os.getenv("TELEGRAM_SOURCE_CHAT")
-    session_name = os.getenv(
-        "COLLECTOR_TELETHON_SESSION_NAME",
-        os.getenv("TELETHON_SESSION_NAME", DEFAULT_SESSION_NAME),
+    collector_override = os.getenv("COLLECTOR_TELETHON_SESSION_NAME")
+    session_env = os.getenv("TELETHON_SESSION") or os.getenv("TELETHON_SESSION_PATH")
+    session_name = os.getenv("TELETHON_SESSION_NAME", DEFAULT_SESSION_NAME)
+    session_name = resolve_telethon_session_path(
+        collector_override or session_env,
+        session_name,
+        default_name=DEFAULT_SESSION_NAME,
     )
-    session_name = _resolve_session_name(session_name)
     gemini_api_key = _require_env("GEMINI_API_KEY")
     gemini_model = os.getenv("GEMINI_MODEL") or None
     cooldown_seconds = _get_int_env("GEMINI_COOLDOWN_SECONDS", 60, min_value=0)
@@ -98,8 +110,15 @@ def load_bot_settings() -> BotSettings:
         raise RuntimeError(
             "TELEGRAM_API_ID and TELEGRAM_API_HASH are required for Telethon-based group management"
         )
+    ui_override = os.getenv("UI_TELETHON_SESSION")
+    session_env = os.getenv("TELETHON_SESSION") or os.getenv("TELETHON_SESSION_PATH")
+    collector_override = os.getenv("COLLECTOR_TELETHON_SESSION_NAME")
     session_name = os.getenv("TELETHON_SESSION_NAME", DEFAULT_SESSION_NAME)
-    session_name = _resolve_session_name(session_name)
+    session_name = resolve_telethon_session_path(
+        ui_override or session_env or collector_override,
+        session_name,
+        default_name=DEFAULT_SESSION_NAME,
+    )
     telethon_dialog_limit = _get_int_env("TELETHON_DIALOGS_LIMIT", 200, min_value=1)
     gemini_model = os.getenv("GEMINI_MODEL", "models/gemini-flash-latest")
     gemini_cooldown_seconds = _get_int_env("GEMINI_COOLDOWN_SECONDS", 60, min_value=0)
@@ -118,6 +137,24 @@ def load_bot_settings() -> BotSettings:
         gemini_cooldown_seconds=gemini_cooldown_seconds,
         config_sync_mode=config_sync_mode,
         delivery_tick_seconds=delivery_tick_seconds,
+    )
+
+
+def load_telethon_auth_settings() -> TelethonAuthSettings:
+    api_id = _require_env("TELEGRAM_API_ID")
+    api_hash = _require_env("TELEGRAM_API_HASH")
+    session_env = os.getenv("TELETHON_SESSION") or os.getenv("TELETHON_SESSION_PATH")
+    collector_override = os.getenv("COLLECTOR_TELETHON_SESSION_NAME")
+    session_name = os.getenv("TELETHON_SESSION_NAME", DEFAULT_SESSION_NAME)
+    session_name = resolve_telethon_session_path(
+        session_env or collector_override,
+        session_name,
+        default_name=DEFAULT_SESSION_NAME,
+    )
+    return TelethonAuthSettings(
+        api_id=_parse_int(api_id, "TELEGRAM_API_ID"),
+        api_hash=api_hash,
+        session_name=session_name,
     )
 
 
@@ -145,14 +182,6 @@ def _get_int_env(var_name: str, default: int, min_value: int | None = None) -> i
     return value
 
 
-def _resolve_session_name(session_name: str) -> str:
-    session_path = os.getenv("TELETHON_SESSION_PATH")
-    if not session_path:
-        return session_name
-    path = Path(session_path)
-    if path.suffix:
-        return str(path)
-    return str(path / session_name)
 
 
 def _get_optional_int_env(var_name: str) -> int | None:
