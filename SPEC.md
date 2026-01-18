@@ -1,5 +1,7 @@
 # PulseDidgest — Specification (MVP)
 
+Эта спецификация описывает исходный MVP. Текущая реализация уже включает multi-user и digest-доставку; актуальные возможности см. в `README.md` и `PROJECT_MEMO.md`.
+
 ## Цель
 PulseDidgest — сервис, который:
 - собирает сообщения из Telegram-групп,

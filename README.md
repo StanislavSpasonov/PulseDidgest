@@ -113,12 +113,21 @@ Collector использует `DATABASE_URL` во время запуска и 
 
 Рекомендуемый путь сессии: `TELETHON_SESSION=.sessions/pulsedidgest` и один общий файл для bot + collector.
 
+Перед авторизацией проверьте `.env`:
+- `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`
+- `TELETHON_SESSION` (например `.sessions/pulsedidgest`)
+
 Одноразовая авторизация (на сервере, вручную):
 
 ```bash
+cd /home/stanislavspasonov/apps/PulseDidgest
+source .venv/bin/activate
+mkdir -p /home/stanislavspasonov/apps/PulseDidgest/.sessions
 python -m apps.auth
 ```
 
+Введите номер телефона, код из Telegram (и пароль 2FA, если включен).
+Файл сессии появится по пути: `/home/stanislavspasonov/apps/PulseDidgest/.sessions/pulsedidgest.session`.
 После успешной авторизации systemd может запускать `python -m apps.main` без интерактива.
 
 ### Переменные окружения
@@ -150,9 +159,12 @@ python -m apps.auth
 
 ## Production deploy on server
 
-- `.env` лежит в `/home/stanislavspasonov/apps/PulseDidgest/.env`
-- Деплой вручную: `bash scripts/deploy.sh`
-- Логи сервиса: `journalctl -u pulsedidgest -f`
+- Путь приложения: `/home/stanislavspasonov/apps/PulseDidgest`
+- `.env`: `/home/stanislavspasonov/apps/PulseDidgest/.env`
+- Деплой вручную: `bash /home/stanislavspasonov/apps/PulseDidgest/scripts/deploy.sh`
+- Перезапуск сервиса: `sudo systemctl restart pulsedidgest`
+- Статус: `systemctl status pulsedidgest --no-pager`
+- Логи: `journalctl -u pulsedidgest -f`
 
 ## Dev: setup + run + tests
 
