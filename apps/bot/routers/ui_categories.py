@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import html
 from typing import Iterable, List, Optional, Set, Tuple
 
 from aiogram import F, Router, types
@@ -75,21 +76,34 @@ def _format_categories_list(
 
 
 def _format_category_detail(category, links) -> Tuple[str, types.InlineKeyboardMarkup]:
-    prompt_preview = truncate(category.prompt, 200) or "<empty>"
+    prompt_preview = truncate(category.prompt, 200) or "(пусто)"
+    category_name = html.escape(category.name)
+    prompt_preview = html.escape(prompt_preview)
+    debug_label = "Вкл" if category.debug_enabled else "Выкл"
     lines = [
-        f"Категория: {category.name}",
-        f"Debug: {'on' if category.debug_enabled else 'off'}",
-        f"Prompt: {prompt_preview}",
-        "Источники:",
+        f"<b>Категория:</b> {category_name}",
+        "",
+        f"<b>Отладка:</b> {debug_label}",
+        "",
+        f"<b>Инструкция:</b> {prompt_preview}",
+        "",
+        "<b>Режимы</b>",
+        "- <b>Разовая / краткосрочная</b>",
+        "- <b>Постоянная</b> — (в разработке)",
+        "",
+        "<b>Источники</b>",
     ]
     if not links:
-        lines.append("  (нет привязок)")
+        lines.append("— нет источников")
     else:
         for link, group in links:
+            title = group.title or group.username or f"Чат {group.tg_chat_id}"
+            title = html.escape(title)
+            mode_label = _format_delivery_mode(link)
+            status_label = "включен" if link.is_enabled else "выключен"
             lines.append(
-                f"- {group.title or group.tg_chat_id} "
-                f"(chat_id={group.tg_chat_id}) mode={link.delivery_mode} "
-                f"enabled={link.is_enabled}"
+                f"- <b>{title}</b> — id: <code>{group.tg_chat_id}</code> · "
+                f"режим: <b>{mode_label}</b> · статус: <b>{status_label}</b>"
             )
     builder = InlineKeyboardBuilder()
     builder.button(
@@ -122,6 +136,23 @@ def _format_category_detail(category, links) -> Tuple[str, types.InlineKeyboardM
     builder.button(text="🏠 Домой", callback_data=NavCb(action="home").pack())
     builder.adjust(2)
     return "\n".join(lines), builder.as_markup()
+
+
+def _format_delivery_mode(link) -> str:
+    mode = (link.delivery_mode or "").lower()
+    if mode == "instant":
+        return "мгновенно"
+    if mode == "hourly":
+        return "каждый час"
+    if mode == "interval":
+        if link.delivery_interval_minutes:
+            return f"каждые {link.delivery_interval_minutes} мин"
+        return "интервал"
+    if mode == "daily":
+        if link.delivery_time_local:
+            return f"ежедневно {link.delivery_time_local}"
+        return "ежедневно"
+    return mode or "неизвестно"
 
 
 def _build_sources_select_kb(
@@ -316,7 +347,7 @@ def build_router(deps: UiDeps) -> Router:
             await respond(callback, f"Не удалось загрузить категорию: {exc}")
             return
         text, kb = _format_category_detail(category, links)
-        await respond(callback, text, kb)
+        await respond(callback, text, kb, parse_mode="HTML")
 
     @router.callback_query(CategoryCb.filter(F.action == "search"))
     async def handle_search(callback: types.CallbackQuery, state: FSMContext) -> None:
