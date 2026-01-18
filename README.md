@@ -206,23 +206,31 @@ sudo systemctl disable pulsedidgest
 
 ### Логи — основные сценарии
 ```bash
+# Live логи сервиса (все уровни), поток в реальном времени
 sudo journalctl -u pulsedidgest -f --no-pager
 ```
 ```bash
+# Live логи только уровня error и выше (INFO/DEBUG отсекаются)
 sudo journalctl -u pulsedidgest -p err -f --no-pager
 ```
 ```bash
+# Последние 200 строк логов (все уровни)
 sudo journalctl -u pulsedidgest -n 200 --no-pager
+# Последние 200 строк только ошибок
 sudo journalctl -u pulsedidgest -p err -n 200 --no-pager
 ```
 ```bash
+# Фильтр по исключениям/Traceback/ERROR/CRITICAL в live-логах
 sudo journalctl -u pulsedidgest -f --no-pager | grep -E "Traceback|Exception|ERROR|CRITICAL"
 ```
 ```bash
+# Логи после последнего старта (последние 200 строк)
 sudo journalctl -u pulsedidgest -b --no-pager | tail -n 200
+# Ошибки после последнего старта
 sudo journalctl -u pulsedidgest -b -p err --no-pager
 ```
 ```bash
+# Показать, почему сервис падает (короткий статус + последние логи)
 sudo systemctl status pulsedidgest --no-pager | head -n 50
 sudo journalctl -u pulsedidgest -n 120 --no-pager
 ```
