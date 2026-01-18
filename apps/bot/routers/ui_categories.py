@@ -5,6 +5,7 @@ import html
 from typing import Iterable, List, Optional, Set, Tuple
 
 from aiogram import F, Router, types
+from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -584,7 +585,7 @@ def build_router(deps: UiDeps) -> Router:
         await state.set_state(CategoryCreateState.delivery_decision)
         await respond(callback, "Настроить доставку?", _build_delivery_decision_kb())
 
-    @router.callback_query(CategoryCb.filter(F.action == "wizard_back"), CategoryCreateState)
+    @router.callback_query(CategoryCb.filter(F.action == "wizard_back"), StateFilter(CategoryCreateState))
     async def handle_wizard_back(callback: types.CallbackQuery, state: FSMContext) -> None:
         user = await _require_admin_or_power(callback)
         if not user:
