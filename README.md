@@ -166,6 +166,79 @@ python -m apps.auth
 - Статус: `systemctl status pulsedidgest --no-pager`
 - Логи: `journalctl -u pulsedidgest -f`
 
+## Server Operations (SSH, Logs, Service)
+
+### SSH подключение
+```bash
+ssh -i ~/.ssh/id_ed25519 stanislavspasonov@35.232.83.169
+```
+```bash
+hostname
+whoami
+```
+```bash
+# замените IP/пользователя на свои
+ssh -i ~/.ssh/id_ed25519 <user>@<server_ip>
+```
+
+### Где проект
+```bash
+cd ~/apps/PulseDidgest
+ls -la
+```
+```bash
+git status
+git rev-parse --abbrev-ref HEAD
+git log -1 --oneline
+```
+
+### Управление сервисом (systemd)
+```bash
+sudo systemctl start pulsedidgest
+sudo systemctl stop pulsedidgest
+sudo systemctl restart pulsedidgest
+sudo systemctl status pulsedidgest --no-pager | head -n 30
+```
+```bash
+sudo systemctl enable pulsedidgest
+sudo systemctl disable pulsedidgest
+```
+
+### Логи — основные сценарии
+```bash
+sudo journalctl -u pulsedidgest -f --no-pager
+```
+```bash
+sudo journalctl -u pulsedidgest -p err -f --no-pager
+```
+```bash
+sudo journalctl -u pulsedidgest -n 200 --no-pager
+sudo journalctl -u pulsedidgest -p err -n 200 --no-pager
+```
+```bash
+sudo journalctl -u pulsedidgest -f --no-pager | grep -E "Traceback|Exception|ERROR|CRITICAL"
+```
+```bash
+sudo journalctl -u pulsedidgest -b --no-pager | tail -n 200
+sudo journalctl -u pulsedidgest -b -p err --no-pager
+```
+```bash
+sudo systemctl status pulsedidgest --no-pager | head -n 50
+sudo journalctl -u pulsedidgest -n 120 --no-pager
+```
+
+### Как выйти из live-логов
+```bash
+Ctrl+C
+```
+
+### Быстрые проверки “всё ли ок”
+```bash
+sudo systemctl is-active pulsedidgest
+sudo systemctl status pulsedidgest --no-pager | head -n 20
+sudo journalctl -u pulsedidgest -p err -n 50 --no-pager
+```
+
 ## Dev: setup + run + tests
 
 1. Создать виртуальное окружение: `python -m venv .venv`
