@@ -8,6 +8,7 @@
 
 ## Done
 - Ops: systemd unit template + deploy script + workflow update + env diagnostics + README deploy notes
+- Ops: bootstrap git pull before deploy script in workflow
 - Fix: apps.auth NameError при запуске (порядок функций)
 - Auth: повторный ввод телефона/кода при ошибке Telethon
 - Fix: единый резолвер Telethon session + auth команда + диагностика + тесты
@@ -58,3 +59,4 @@
 
 ## Next
 - Smoke: задеплоить на сервер, проверить systemd env/логи и Telethon session
+- CD: перезапустить workflow deploy после обновления скрипта

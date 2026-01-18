@@ -17,7 +17,10 @@ jobs:
           script: |
             set -e
             cd ~/apps/PulseDidgest
-            bash /home/stanislavspasonov/apps/PulseDidgest/scripts/deploy.sh || {
+            git fetch origin
+            git checkout deploy
+            git pull --ff-only origin deploy
+            bash scripts/deploy.sh || {
               sudo journalctl -u pulsedidgest -n 200 --no-pager || true
               exit 1
             }
