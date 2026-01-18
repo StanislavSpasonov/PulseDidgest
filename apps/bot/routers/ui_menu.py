@@ -94,10 +94,14 @@ def build_router(deps: UiDeps) -> Router:
     router = Router()
 
     async def _attach_menu_keyboard(message: types.Message) -> None:
-        await message.answer(
-            "☰ Меню доступно снизу.",
+        sent = await message.answer(
+            " ",
             reply_markup=build_menu_button_keyboard(),
         )
+        try:
+            await sent.delete()
+        except Exception:
+            pass
 
     @router.message(CommandStart())
     async def handle_start(message: types.Message, state: FSMContext) -> None:

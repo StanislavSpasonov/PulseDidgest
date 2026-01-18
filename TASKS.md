@@ -18,6 +18,7 @@
 - Fix: wizard_back фильтр использует StateFilter для корректного FSM
 - Docs: README — SSH/логи/systemd операции на сервере
 - Docs: README — комментарии к командам логов
+- UI: убран текст «☰ Меню доступно снизу.»
 - Fix: apps.auth NameError при запуске (порядок функций)
 - Auth: повторный ввод телефона/кода при ошибке Telethon
 - Fix: единый резолвер Telethon session + auth команда + диагностика + тесты
