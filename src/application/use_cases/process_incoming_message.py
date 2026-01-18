@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
@@ -123,24 +124,36 @@ class ProcessIncomingMessageUseCase:
                 )
             except Exception as exc:
                 error_code = exc.__class__.__name__
+                error_text = str(exc)
                 if self._cooldown and error_code == "ResourceExhausted":
                     self._logger.warning(
                         "LLM quota exhausted for category=%s: %s",
                         route.category_name,
-                        exc,
+                        error_text,
                     )
                     self._cooldown.activate()
+                    await self._notify_llm_limit(
+                        category_name=route.category_name,
+                        error_code=error_code,
+                        error_text=error_text,
+                    )
+                elif self._is_llm_limit_error(error_code, error_text):
+                    await self._notify_llm_limit(
+                        category_name=route.category_name,
+                        error_code=error_code,
+                        error_text=error_text,
+                    )
                 else:
                     self._logger.error(
                         "LLM classification failed for category=%s: %s",
                         route.category_name,
-                        exc,
+                        error_text,
                     )
                 await self._store.record_error(
                     message_record,
                     route.category_id,
                     error_code,
-                    str(exc),
+                    error_text,
                 )
                 continue
 
@@ -214,3 +227,56 @@ class ProcessIncomingMessageUseCase:
                     await self._notifier.notify_admin(
                         f"[DEBUG {route.category_name}] too many events, throttling"
                     )
+
+    def _is_llm_limit_error(self, error_code: str, error_text: str) -> bool:
+        lowered = error_text.lower()
+        return (
+            error_code == "ResourceExhausted"
+            or "quota" in lowered
+            or "rate limit" in lowered
+            or "rate-limit" in lowered
+            or "429" in lowered
+            or "resource_exhausted" in lowered
+        )
+
+    def _extract_retry_seconds(self, error_text: str) -> int | None:
+        match = re.search(r"retry in ([0-9.]+)s", error_text, re.IGNORECASE)
+        if match:
+            try:
+                return int(float(match.group(1)))
+            except ValueError:
+                return None
+        match = re.search(r"retry_delay\\s*\\{\\s*seconds:\\s*(\\d+)", error_text)
+        if match:
+            try:
+                return int(match.group(1))
+            except ValueError:
+                return None
+        return None
+
+    async def _notify_llm_limit(
+        self,
+        category_name: str,
+        error_code: str,
+        error_text: str,
+    ) -> None:
+        if not self._notifier:
+            return
+        retry_seconds = self._extract_retry_seconds(error_text)
+        cooldown_seconds = self._cooldown.remaining_seconds() if self._cooldown else 0
+        limit_type = "quota" if "quota" in error_text.lower() else "rate"
+        code_label = "429" if "429" in error_text else error_code
+        message = (
+            f"⚠️ LLM лимит/квота ({code_label}). "
+            f"Категория: {category_name}. "
+            f"Тип: {limit_type}."
+        )
+        if retry_seconds is not None:
+            message += f" Retry через: {retry_seconds}с."
+        if cooldown_seconds:
+            message += f" Cooldown: {cooldown_seconds}с."
+        short_error = error_text.strip().replace("\n", " ")
+        if len(short_error) > 200:
+            short_error = short_error[:200] + "..."
+        message += f" Сообщение: {short_error}"
+        await self._notifier.notify_admin(message)
