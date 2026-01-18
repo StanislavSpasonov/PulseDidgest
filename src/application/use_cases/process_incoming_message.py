@@ -246,7 +246,7 @@ class ProcessIncomingMessageUseCase:
                 return int(float(match.group(1)))
             except ValueError:
                 return None
-        match = re.search(r"retry_delay\\s*\\{\\s*seconds:\\s*(\\d+)", error_text)
+        match = re.search(r"retry_delay\s*\{\s*seconds:\s*(\d+)", error_text)
         if match:
             try:
                 return int(match.group(1))
