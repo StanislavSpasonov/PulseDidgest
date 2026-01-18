@@ -13,6 +13,8 @@
 - Docs: обновлены CONTRIBUTING и SPEC под актуальный git/deploy и статус MVP
 - Release: merge deploy into dev
 - UI: категория — читабельные заголовки, русский текст, формат источников
+- UI: wizard «создание категории» — корректный «Назад» с сохранением данных + тесты
+- UI: источники → мои чаты — мультивыбор + локальный поиск + Next для батча
 - Fix: apps.auth NameError при запуске (порядок функций)
 - Auth: повторный ввод телефона/кода при ошибке Telethon
 - Fix: единый резолвер Telethon session + auth команда + диагностика + тесты
@@ -62,5 +64,4 @@
 - Epic: MVP hardening (dynamic routing, delivery outbox/scheduler, formatting, UX, tests, docs)
 
 ## Next
-- Smoke: задеплоить на сервер, проверить systemd env/логи и Telethon session
-- CD: перезапустить workflow deploy после обновления скрипта
+- Smoke: проверить «Мои чаты» (мультивыбор, поиск, Next) в боте

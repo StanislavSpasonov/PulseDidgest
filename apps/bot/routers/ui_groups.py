@@ -18,6 +18,11 @@ class GroupSearchState(StatesGroup):
     query = State()
 
 
+class GroupSelectState(StatesGroup):
+    selecting = State()
+    search_query = State()
+
+
 def _build_groups_menu() -> types.InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="📋 Мои чаты", callback_data=GroupCb(action="my", page=0).pack())
@@ -26,6 +31,49 @@ def _build_groups_menu() -> types.InlineKeyboardMarkup:
     builder.button(text="🏠 Домой", callback_data=NavCb(action="home").pack())
     builder.adjust(1)
     return builder.as_markup()
+
+
+def _serialize_chat(chat) -> dict:
+    return {
+        "chat_id": int(chat.chat_id),
+        "title": chat.title,
+        "username": chat.username,
+    }
+
+
+def _format_chat_label_from_dict(chat: dict) -> str:
+    title = chat.get("title")
+    username = chat.get("username")
+    chat_id = chat.get("chat_id")
+    if title:
+        if username:
+            return f"{title} (@{username})"
+        return title
+    if username:
+        return f"@{username}"
+    return str(chat_id)
+
+
+def _filter_my_chats(chats: List[dict], query: str) -> List[dict]:
+    query = (query or "").strip().lower()
+    if not query:
+        return list(chats)
+    filtered = []
+    for chat in chats:
+        title = (chat.get("title") or "").lower()
+        username = (chat.get("username") or "").lower()
+        if query in title or query in username:
+            filtered.append(chat)
+    return filtered
+
+
+def _toggle_selected_chat(selected: Set[int], chat_id: int) -> Set[int]:
+    updated = set(selected)
+    if chat_id in updated:
+        updated.remove(chat_id)
+    else:
+        updated.add(chat_id)
+    return updated
 
 
 def _format_dialogs_list(
@@ -55,6 +103,51 @@ def _format_dialogs_list(
         page_callback_fn=lambda p: GroupCb(action=list_action, page=p).pack(),
         back_cb=GroupCb(action="menu").pack(),
         home_cb=NavCb(action="home").pack(),
+    )
+    return "\n".join(lines), kb
+
+
+def _build_my_chats_select_list(
+    chats: List[dict],
+    selected: Set[int],
+    registered_ids: Set[int],
+    page: int,
+    per_page: int,
+    query: str,
+) -> Tuple[str, types.InlineKeyboardMarkup]:
+    lines = ["Мои чаты:"]
+    if query:
+        lines.append(f"Поиск: {query}")
+    if not chats:
+        lines.append("Ничего не найдено.")
+    page_obj, kb = build_one_column_list(
+        chats,
+        label_fn=lambda chat: "{} {}".format(
+            "✅" if chat["chat_id"] in selected else "➕",
+            _format_chat_label_from_dict(chat),
+        ),
+        callback_fn=lambda chat: GroupCb(
+            action="toggle", chat_id=int(chat["chat_id"]), page=page
+        ).pack(),
+        page=page,
+        page_size=per_page,
+        page_callback_fn=lambda p: GroupCb(action="my", page=p).pack(),
+        back_cb=GroupCb(action="menu").pack(),
+        home_cb=NavCb(action="home").pack(),
+        extra_rows=[
+            [
+                types.InlineKeyboardButton(
+                    text="🔎 Поиск",
+                    callback_data=GroupCb(action="my_search").pack(),
+                )
+            ],
+            [
+                types.InlineKeyboardButton(
+                    text="Дальше ➡️",
+                    callback_data=GroupCb(action="my_next").pack(),
+                )
+            ],
+        ],
     )
     return "\n".join(lines), kb
 
@@ -138,6 +231,28 @@ def build_router(deps: UiDeps) -> Router:
         return bool(user and (is_admin(user, deps.admin_user_id) or is_power(user, deps.admin_user_id)))
 
 
+    async def _render_my_chats_list(
+        event: types.CallbackQuery | types.Message,
+        state: FSMContext,
+        page: int,
+    ) -> None:
+        data = await state.get_data()
+        chats = data.get("my_chats", [])
+        selected = set(data.get("selected_chat_ids", []))
+        query = data.get("my_query", "")
+        groups = await asyncio.to_thread(deps.admin_repo.list_groups)
+        registered_ids = {int(group.tg_chat_id) for group in groups}
+        filtered = _filter_my_chats(chats, query)
+        text, kb = _build_my_chats_select_list(
+            filtered,
+            selected,
+            registered_ids,
+            page,
+            6,
+            query,
+        )
+        await respond(event, text, kb)
+
     @router.callback_query(GroupCb.filter(F.action == "menu"))
     async def handle_menu(callback: types.CallbackQuery, state: FSMContext) -> None:
         if not await _is_admin_or_power(callback.from_user.id):
@@ -147,31 +262,35 @@ def build_router(deps: UiDeps) -> Router:
         await respond(callback, "Группы (источники)", _build_groups_menu())
 
     @router.callback_query(GroupCb.filter(F.action == "my"))
-    async def handle_my_chats(callback: types.CallbackQuery, callback_data: GroupCb) -> None:
+    async def handle_my_chats(
+        callback: types.CallbackQuery, callback_data: GroupCb, state: FSMContext
+    ) -> None:
         if not await _is_admin_or_power(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
             return
-        try:
-            chats = await deps.list_chats_use_case.execute(limit=deps.telethon_dialog_limit)
-        except TelethonUnauthorizedError as exc:
-            deps.logger.warning("Telethon not authorized: %s", exc)
-            await respond(callback, _telethon_auth_required_text())
-            return
-        except Exception as exc:
-            deps.logger.exception("Telethon list failed: %s", exc)
-            await respond(callback, f"Не удалось получить список чатов: {exc}")
-            return
-        groups = await asyncio.to_thread(deps.admin_repo.list_groups)
-        registered_ids = {int(group.tg_chat_id) for group in groups}
-        text, kb = _format_dialogs_list(
-            chats,
-            registered_ids,
-            callback_data.page,
-            6,
-            "Мои чаты:",
-            "my",
-        )
-        await respond(callback, text, kb)
+        data = await state.get_data()
+        chats = data.get("my_chats")
+        if chats is None:
+            try:
+                chats_raw = await deps.list_chats_use_case.execute(
+                    limit=deps.telethon_dialog_limit
+                )
+            except TelethonUnauthorizedError as exc:
+                deps.logger.warning("Telethon not authorized: %s", exc)
+                await respond(callback, _telethon_auth_required_text())
+                return
+            except Exception as exc:
+                deps.logger.exception("Telethon list failed: %s", exc)
+                await respond(callback, f"Не удалось получить список чатов: {exc}")
+                return
+            chats = [_serialize_chat(chat) for chat in chats_raw]
+            await state.update_data(
+                my_chats=chats,
+                selected_chat_ids=[],
+                my_query="",
+            )
+        await state.set_state(GroupSelectState.selecting)
+        await _render_my_chats_list(callback, state, callback_data.page)
 
     @router.callback_query(GroupCb.filter(F.action == "registered"))
     async def handle_registered(callback: types.CallbackQuery, callback_data: GroupCb) -> None:
@@ -193,6 +312,15 @@ def build_router(deps: UiDeps) -> Router:
         builder.button(text="🏠 Домой", callback_data=NavCb(action="home").pack())
         builder.adjust(2)
         await respond(callback, "Введите часть названия или username для поиска:", builder.as_markup())
+
+    @router.callback_query(GroupCb.filter(F.action == "my_search"), GroupSelectState.selecting)
+    async def handle_my_search(callback: types.CallbackQuery, state: FSMContext) -> None:
+        builder = InlineKeyboardBuilder()
+        builder.button(text="⬅️ Назад", callback_data=GroupCb(action="my").pack())
+        builder.button(text="🏠 Домой", callback_data=NavCb(action="home").pack())
+        builder.adjust(2)
+        await state.set_state(GroupSelectState.search_query)
+        await respond(callback, "Введите текст для поиска:", builder.as_markup())
 
     @router.message(GroupSearchState.query)
     async def handle_search_query(message: types.Message, state: FSMContext) -> None:
@@ -228,6 +356,64 @@ def build_router(deps: UiDeps) -> Router:
             "search_page",
         )
         await message.answer(text, reply_markup=kb)
+
+    @router.message(GroupSelectState.search_query)
+    async def handle_my_search_query(message: types.Message, state: FSMContext) -> None:
+        if not await _is_admin_or_power(message.from_user.id if message.from_user else None):
+            await message.answer("Меню доступно только администраторам.")
+            await state.clear()
+            return
+        query = (message.text or "").strip()
+        await state.update_data(my_query=query)
+        await state.set_state(GroupSelectState.selecting)
+        await _render_my_chats_list(message, state, 0)
+
+    @router.callback_query(GroupCb.filter(F.action == "toggle"), GroupSelectState.selecting)
+    async def handle_my_toggle(
+        callback: types.CallbackQuery, callback_data: GroupCb, state: FSMContext
+    ) -> None:
+        data = await state.get_data()
+        selected = set(data.get("selected_chat_ids", []))
+        selected = _toggle_selected_chat(selected, callback_data.chat_id)
+        await state.update_data(selected_chat_ids=list(selected))
+        await _render_my_chats_list(callback, state, callback_data.page)
+
+    @router.callback_query(GroupCb.filter(F.action == "my_next"), GroupSelectState.selecting)
+    async def handle_my_next(callback: types.CallbackQuery, state: FSMContext) -> None:
+        data = await state.get_data()
+        selected = list({int(chat_id) for chat_id in data.get("selected_chat_ids", [])})
+        if not selected:
+            await respond(callback, "Выберите хотя бы один чат.")
+            await _render_my_chats_list(callback, state, 0)
+            return
+        chats = {int(chat["chat_id"]): chat for chat in data.get("my_chats", [])}
+        for chat_id in selected:
+            chat = chats.get(chat_id)
+            if not chat:
+                continue
+            await asyncio.to_thread(
+                deps.admin_repo.register_group,
+                chat_id,
+                chat.get("title") or chat.get("username"),
+                chat.get("username"),
+            )
+        user = await fetch_user(deps, callback.from_user.id)
+        if user and not is_admin(user, deps.admin_user_id):
+            categories = await asyncio.to_thread(
+                deps.access_repo.list_editable_categories_for_user,
+                user.id,
+            )
+        else:
+            categories = await asyncio.to_thread(deps.admin_repo.list_categories)
+        if not categories:
+            await respond(callback, "Сначала создайте категорию.", _build_groups_menu())
+            return
+        await state.update_data(selected_chat_ids=selected)
+        await respond(
+            callback,
+            f"Добавлено чатов: {len(selected)}.\nПривязать к категории?",
+            _build_bind_category_kb(categories, 0),
+        )
 
     @router.callback_query(GroupCb.filter(F.action == "search_page"), GroupSearchState.query)
     async def handle_search_page(
@@ -309,7 +495,7 @@ def build_router(deps: UiDeps) -> Router:
 
     @router.callback_query(LinkCb.filter(F.action == "bind"))
     async def handle_bind_from_group(
-        callback: types.CallbackQuery, callback_data: LinkCb
+        callback: types.CallbackQuery, callback_data: LinkCb, state: FSMContext
     ) -> None:
         if not await _is_admin_or_power(callback.from_user.id):
             await respond(callback, "Меню доступно только администраторам.")
@@ -329,21 +515,27 @@ def build_router(deps: UiDeps) -> Router:
                 if not (is_owner or permission == "edit"):
                     await respond(callback, "Нет доступа к категории.")
                     return
-            await asyncio.to_thread(
-                deps.admin_repo.bind_category,
-                category.name,
-                callback_data.chat_id,
-            )
-            deps.logger.info(
-                "Binding created via UI: category=%s chat_id=%s",
-                category.name,
-                callback_data.chat_id,
-            )
+            chat_ids = [callback_data.chat_id]
+            if callback_data.chat_id == 0:
+                data = await state.get_data()
+                chat_ids = list({int(chat_id) for chat_id in data.get("selected_chat_ids", [])})
+            for chat_id in chat_ids:
+                await asyncio.to_thread(
+                    deps.admin_repo.bind_category,
+                    category.name,
+                    chat_id,
+                )
+                deps.logger.info(
+                    "Binding created via UI: category=%s chat_id=%s",
+                    category.name,
+                    chat_id,
+                )
             await respond(
                 callback,
                 f"Привязка создана: {category.name}",
                 _build_groups_menu(),
             )
+            await state.clear()
         except Exception as exc:
             await respond(callback, f"Не удалось привязать: {exc}")
 

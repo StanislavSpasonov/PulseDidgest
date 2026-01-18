@@ -42,6 +42,40 @@ def _nav_buttons(back_cb: str) -> types.InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+def _format_create_name_text(name: str | None) -> str:
+    text = "Введите имя новой категории:"
+    if name:
+        text += f"\n\nТекущее имя: {name}"
+    return text
+
+
+def _format_create_prompt_text(prompt: str | None) -> str:
+    text = "Введите промпт для категории (можно несколько строк):"
+    if prompt:
+        text += f"\n\nТекущий текст:\n{truncate(prompt, 200)}"
+    return text
+
+
+def _resolve_create_back_state(current_state: str | None, data: dict) -> str | None:
+    if current_state == CategoryCreateState.name.state:
+        return None
+    if current_state == CategoryCreateState.prompt.state:
+        return CategoryCreateState.name.state
+    if current_state == CategoryCreateState.sources_decision.state:
+        return CategoryCreateState.prompt.state
+    if current_state == CategoryCreateState.sources_select.state:
+        return CategoryCreateState.sources_decision.state
+    if current_state == CategoryCreateState.delivery_decision.state:
+        if data.get("sources_flow") == "select":
+            return CategoryCreateState.sources_select.state
+        return CategoryCreateState.sources_decision.state
+    if current_state == CategoryCreateState.delivery_custom_time.state:
+        return CategoryCreateState.delivery_decision.state
+    if current_state == CategoryCreateState.summary.state:
+        return CategoryCreateState.delivery_decision.state
+    return None
+
+
 def _build_categories_menu() -> types.InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text="➕ Создать", callback_data=CategoryCb(action="create").pack())
@@ -156,7 +190,7 @@ def _format_delivery_mode(link) -> str:
 
 
 def _build_sources_select_kb(
-    groups, selected: Set[int], page: int, per_page: int
+    groups, selected: Set[int], page: int, per_page: int, back_cb: str
 ) -> Tuple[str, types.InlineKeyboardMarkup]:
     lines = ["Выберите источники (можно несколько):"]
     if not groups:
@@ -173,7 +207,7 @@ def _build_sources_select_kb(
         page=page,
         page_size=per_page,
         page_callback_fn=lambda p: CategorySourceCb(action="page", page=p).pack(),
-        back_cb=CategoryCb(action="menu").pack(),
+        back_cb=back_cb,
         home_cb=NavCb(action="home").pack(),
         extra_rows=[
             [
@@ -197,7 +231,7 @@ def _build_sources_decision_kb() -> types.InlineKeyboardMarkup:
         text="Пропустить",
         callback_data=CategoryCb(action="sources_skip").pack(),
     )
-    builder.button(text="⬅️ Назад", callback_data=CategoryCb(action="menu").pack())
+    builder.button(text="⬅️ Назад", callback_data=CategoryCb(action="wizard_back").pack())
     builder.button(text="🏠 Домой", callback_data=NavCb(action="home").pack())
     builder.adjust(1)
     return builder.as_markup()
@@ -218,7 +252,7 @@ def _build_delivery_decision_kb() -> types.InlineKeyboardMarkup:
         callback_data=CategoryDeliveryCb(action="select", mode="skip").pack(),
     )
     builder.button(
-        text="⬅️ Назад", callback_data=CategoryCb(action="menu").pack()
+        text="⬅️ Назад", callback_data=CategoryCb(action="wizard_back").pack()
     )
     builder.button(text="🏠 Домой", callback_data=NavCb(action="home").pack())
     builder.adjust(1)
@@ -396,8 +430,8 @@ def build_router(deps: UiDeps) -> Router:
         await state.set_state(CategoryCreateState.name)
         await respond(
             callback,
-            "Введите имя новой категории:",
-            _nav_buttons(CategoryCb(action="menu").pack()),
+            _format_create_name_text(None),
+            _nav_buttons(CategoryCb(action="wizard_back").pack()),
         )
 
     @router.message(CategoryCreateState.name)
@@ -413,8 +447,8 @@ def build_router(deps: UiDeps) -> Router:
         await state.update_data(name=name)
         await state.set_state(CategoryCreateState.prompt)
         await message.answer(
-            "Введите промпт для категории (можно несколько строк):",
-            reply_markup=_nav_buttons(CategoryCb(action="menu").pack()),
+            _format_create_prompt_text(None),
+            reply_markup=_nav_buttons(CategoryCb(action="wizard_back").pack()),
         )
 
     @router.message(CategoryCreateState.prompt)
@@ -435,13 +469,19 @@ def build_router(deps: UiDeps) -> Router:
     async def handle_sources_yes(callback: types.CallbackQuery, state: FSMContext) -> None:
         await state.set_state(CategoryCreateState.sources_select)
         groups = await asyncio.to_thread(deps.admin_repo.list_groups)
-        await state.update_data(selected_chat_ids=[])
-        text, kb = _build_sources_select_kb(groups, set(), 0, 6)
+        await state.update_data(selected_chat_ids=[], sources_flow="select")
+        text, kb = _build_sources_select_kb(
+            groups,
+            set(),
+            0,
+            6,
+            CategoryCb(action="wizard_back").pack(),
+        )
         await respond(callback, text, kb)
 
     @router.callback_query(CategoryCb.filter(F.action == "sources_skip"), CategoryCreateState.sources_decision)
     async def handle_sources_skip(callback: types.CallbackQuery, state: FSMContext) -> None:
-        await state.update_data(selected_chat_ids=[])
+        await state.update_data(selected_chat_ids=[], sources_flow="skip")
         await state.set_state(CategoryCreateState.delivery_decision)
         await respond(callback, "Настроить доставку?", _build_delivery_decision_kb())
 
@@ -457,7 +497,13 @@ def build_router(deps: UiDeps) -> Router:
             selected.add(callback_data.chat_id)
         await state.update_data(selected_chat_ids=list(selected))
         groups = await asyncio.to_thread(deps.admin_repo.list_groups)
-        text, kb = _build_sources_select_kb(groups, selected, callback_data.page, 6)
+        text, kb = _build_sources_select_kb(
+            groups,
+            selected,
+            callback_data.page,
+            6,
+            CategoryCb(action="wizard_back").pack(),
+        )
         await respond(callback, text, kb)
 
     @router.callback_query(CategorySourceCb.filter(F.action == "page"), CategoryCreateState.sources_select)
@@ -467,12 +513,19 @@ def build_router(deps: UiDeps) -> Router:
         data = await state.get_data()
         selected = set(data.get("selected_chat_ids", []))
         groups = await asyncio.to_thread(deps.admin_repo.list_groups)
-        text, kb = _build_sources_select_kb(groups, selected, callback_data.page, 6)
+        text, kb = _build_sources_select_kb(
+            groups,
+            selected,
+            callback_data.page,
+            6,
+            CategoryCb(action="wizard_back").pack(),
+        )
         await respond(callback, text, kb)
 
     @router.callback_query(CategorySourceCb.filter(F.action == "done"), CategoryCreateState.sources_select)
     async def handle_sources_done(callback: types.CallbackQuery, state: FSMContext) -> None:
         await state.set_state(CategoryCreateState.delivery_decision)
+        await state.update_data(sources_flow="select")
         await respond(callback, "Настроить доставку?", _build_delivery_decision_kb())
 
     @router.callback_query(CategoryDeliveryCb.filter(F.action == "select"), CategoryCreateState.delivery_decision)
@@ -509,7 +562,7 @@ def build_router(deps: UiDeps) -> Router:
         await respond(
             callback,
             "Введите время в формате HH:MM:",
-            _nav_buttons(CategoryCb(action="menu").pack()),
+            _nav_buttons(CategoryCb(action="wizard_back").pack()),
         )
 
     @router.message(CategoryCreateState.delivery_custom_time)
@@ -530,6 +583,65 @@ def build_router(deps: UiDeps) -> Router:
     async def handle_delivery_back(callback: types.CallbackQuery, state: FSMContext) -> None:
         await state.set_state(CategoryCreateState.delivery_decision)
         await respond(callback, "Настроить доставку?", _build_delivery_decision_kb())
+
+    @router.callback_query(CategoryCb.filter(F.action == "wizard_back"), CategoryCreateState)
+    async def handle_wizard_back(callback: types.CallbackQuery, state: FSMContext) -> None:
+        user = await _require_admin_or_power(callback)
+        if not user:
+            return
+        data = await state.get_data()
+        current_state = await state.get_state()
+        prev_state = _resolve_create_back_state(current_state, data)
+        if prev_state is None:
+            await state.clear()
+            await respond(callback, "Категории", _build_categories_menu())
+            return
+        await state.set_state(prev_state)
+        await _show_create_step(callback, state, prev_state)
+
+    async def _show_create_step(
+        event: types.CallbackQuery | types.Message, state: FSMContext, step: str
+    ) -> None:
+        data = await state.get_data()
+        if step == CategoryCreateState.name.state:
+            await respond(
+                event,
+                _format_create_name_text(data.get("name")),
+                _nav_buttons(CategoryCb(action="wizard_back").pack()),
+            )
+            return
+        if step == CategoryCreateState.prompt.state:
+            await respond(
+                event,
+                _format_create_prompt_text(data.get("prompt")),
+                _nav_buttons(CategoryCb(action="wizard_back").pack()),
+            )
+            return
+        if step == CategoryCreateState.sources_decision.state:
+            await respond(event, "Добавить источники сейчас?", _build_sources_decision_kb())
+            return
+        if step == CategoryCreateState.sources_select.state:
+            groups = await asyncio.to_thread(deps.admin_repo.list_groups)
+            selected = set(data.get("selected_chat_ids", []))
+            text, kb = _build_sources_select_kb(
+                groups,
+                selected,
+                0,
+                6,
+                CategoryCb(action="wizard_back").pack(),
+            )
+            await respond(event, text, kb)
+            return
+        if step == CategoryCreateState.delivery_decision.state:
+            await respond(event, "Настроить доставку?", _build_delivery_decision_kb())
+            return
+        if step == CategoryCreateState.delivery_custom_time.state:
+            await respond(
+                event,
+                "Введите время в формате HH:MM:",
+                _nav_buttons(CategoryCb(action="wizard_back").pack()),
+            )
+            return
 
     async def _show_summary(
         event: types.CallbackQuery | types.Message, state: FSMContext
