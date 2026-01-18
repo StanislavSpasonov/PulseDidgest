@@ -148,12 +148,6 @@ python -m apps.auth
 
 Рекомендуемый вариант без двусмысленностей: `TELETHON_SESSION=.sessions/pulsedidgest` и единый путь для bot + collector.
 
-## Production deploy on server
-
-- `.env` лежит в `/home/stanislavspasonov/apps/PulseDidgest/.env`
-- Деплой вручную: `bash scripts/deploy.sh`
-- Логи сервиса: `journalctl -u pulsedidgest -f`
-
 ## Dev: setup + run + tests
 
 1. Создать виртуальное окружение: `python -m venv .venv`
