@@ -1,0 +1,18 @@
+[Unit]
+Description=PulseDidgest service
+After=network.target
+
+[Service]
+Type=simple
+User=stanislavspasonov
+WorkingDirectory=/home/stanislavspasonov/apps/PulseDidgest
+EnvironmentFile=/home/stanislavspasonov/apps/PulseDidgest/.env
+ExecStartPre=/usr/bin/bash -lc 'mkdir -p /home/stanislavspasonov/apps/PulseDidgest/.sessions && chown -R stanislavspasonov:stanislavspasonov /home/stanislavspasonov/apps/PulseDidgest/.sessions'
+ExecStart=/home/stanislavspasonov/apps/PulseDidgest/.venv/bin/python -m apps.main
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

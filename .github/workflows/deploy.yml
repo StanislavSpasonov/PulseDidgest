@@ -17,4 +17,7 @@ jobs:
           script: |
             set -e
             cd ~/apps/PulseDidgest
-            ./deploy.sh
+            bash /home/stanislavspasonov/apps/PulseDidgest/scripts/deploy.sh || {
+              sudo journalctl -u pulsedidgest -n 200 --no-pager || true
+              exit 1
+            }
