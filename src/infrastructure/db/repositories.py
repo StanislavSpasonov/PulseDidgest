@@ -729,6 +729,19 @@ class SQLAlchemyUserRepository:
         finally:
             session.close()
 
+    def list_active_admins(self) -> List[UserRecord]:
+        session = self._session_factory()
+        try:
+            stmt = (
+                select(UserModel)
+                .where(UserModel.status == "active")
+                .where(UserModel.role == "admin")
+            )
+            users = session.execute(stmt).scalars().all()
+            return [self._to_record(user) for user in users]
+        finally:
+            session.close()
+
     def list_pending_users(self) -> List[UserRecord]:
         session = self._session_factory()
         try:

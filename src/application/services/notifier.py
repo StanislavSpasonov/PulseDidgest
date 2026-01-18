@@ -91,17 +91,35 @@ class UserNotifier:
         parse_mode: str | None = None,
         reply_markup=None,
     ) -> None:
-        if not self._admin_chat_id:
+        admin_users = []
+        if self._user_repository:
+            admin_users = await asyncio.to_thread(self._user_repository.list_active_admins)
+        if not admin_users and not self._admin_chat_id:
             return
-        try:
-            await self._sender.send_message(
-                self._admin_chat_id,
-                text,
-                parse_mode=parse_mode,
-                reply_markup=reply_markup,
-            )
-        except Exception as exc:  # pragma: no cover
-            self._logger.warning("Failed to send admin notification: %s", exc)
+        for admin in admin_users:
+            try:
+                await self._sender.send_message(
+                    admin.chat_id,
+                    text,
+                    parse_mode=parse_mode,
+                    reply_markup=reply_markup,
+                )
+            except Exception as exc:  # pragma: no cover
+                self._logger.warning(
+                    "Failed to send admin notification to chat_id=%s: %s",
+                    admin.chat_id,
+                    exc,
+                )
+        if not admin_users and self._admin_chat_id:
+            try:
+                await self._sender.send_message(
+                    self._admin_chat_id,
+                    text,
+                    parse_mode=parse_mode,
+                    reply_markup=reply_markup,
+                )
+            except Exception as exc:  # pragma: no cover
+                self._logger.warning("Failed to send admin notification: %s", exc)
 
 
 class DebugThrottle:

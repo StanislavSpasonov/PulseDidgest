@@ -7,6 +7,10 @@
 - Epic: Multi-user (RBAC/ACL + персональная доставка + feedback/inbox)
 
 ## Done
+- Maintenance: reverted unrequested changes per user request
+- Support: add admin notifications for LLM quota/rate limits + tests
+- Support: notify admins about LLM quota/rate limit errors in collector (admin broadcast + retry/cooldown info)
+- Infra: install pytest in local venv and run test suite
 - Ops: systemd unit template + deploy script + workflow update + env diagnostics + README deploy notes
 - Ops: bootstrap git pull before deploy script in workflow
 - Docs: обновлены инструкции README по запуску и Telethon авторизации

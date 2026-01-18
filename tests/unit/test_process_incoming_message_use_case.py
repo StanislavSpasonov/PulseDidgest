@@ -55,6 +55,33 @@ class FakeOutbox:
         self.enqueued.append((args, kwargs))
 
 
+class FakeNotifier:
+    def __init__(self) -> None:
+        self.messages = []
+
+    async def notify_admin(self, text: str) -> None:
+        self.messages.append(text)
+
+
+class FakeCooldown:
+    def __init__(self, remaining: int = 0) -> None:
+        self.remaining = remaining
+        self.activated = False
+
+    def in_cooldown(self) -> bool:
+        return False
+
+    def activate(self) -> None:
+        self.activated = True
+
+    def remaining_seconds(self) -> int:
+        return self.remaining
+
+
+class ResourceExhausted(Exception):
+    pass
+
+
 @dataclass
 class FakeFilterUseCase:
     calls: list
@@ -69,6 +96,16 @@ class FakeFilterUseCase:
             prompt_name="p",
             prompt_version="v",
         )
+
+
+@dataclass
+class FakeFailingFilterUseCase:
+    error: Exception
+    calls: list
+
+    async def classify(self, message_text: str, category_name: str, category_prompt: str):
+        self.calls.append((message_text, category_name, category_prompt))
+        raise self.error
 
 
 def _route(chat_id: int, category_id: str, category_name: str) -> CategoryRoute:
@@ -207,3 +244,73 @@ async def test_process_incoming_message_digest_enqueues() -> None:
     await process.handle(message, snapshot)
 
     assert outbox_repo.enqueued
+
+
+@pytest.mark.asyncio
+async def test_process_incoming_message_notifies_admin_on_quota_error() -> None:
+    repo = FakeRepo()
+    store_use_case = StoreMessageAndDecisionUseCase(repo)
+    error = ResourceExhausted(
+        "429 You exceeded your current quota. Please retry in 12.9s."
+    )
+    filter_use_case = FakeFailingFilterUseCase(error=error, calls=[])
+    notifier = FakeNotifier()
+    cooldown = FakeCooldown(remaining=600)
+    process = ProcessIncomingMessageUseCase(
+        filter_use_case,
+        store_use_case,
+        notifier=notifier,
+        cooldown=cooldown,
+    )
+    snapshot = RoutingSnapshot(
+        active_chat_ids={100},
+        routes={100: [_route(100, "cat-1", "jobs")]},
+        total_bindings=1,
+    )
+    message = IncomingMessage(
+        chat_id=100,
+        message_id=3,
+        date=datetime.now(timezone.utc),
+        text="hello",
+        raw_meta={},
+    )
+
+    await process.handle(message, snapshot)
+
+    assert cooldown.activated
+    assert notifier.messages
+    assert "Категория: jobs" in notifier.messages[0]
+    assert "Retry через: 12с" in notifier.messages[0]
+    assert "Cooldown: 600с" in notifier.messages[0]
+
+
+@pytest.mark.asyncio
+async def test_process_incoming_message_notifies_admin_on_rate_limit_error() -> None:
+    repo = FakeRepo()
+    store_use_case = StoreMessageAndDecisionUseCase(repo)
+    error = RuntimeError("Rate limit exceeded. retry_delay { seconds: 21 }")
+    filter_use_case = FakeFailingFilterUseCase(error=error, calls=[])
+    notifier = FakeNotifier()
+    process = ProcessIncomingMessageUseCase(
+        filter_use_case,
+        store_use_case,
+        notifier=notifier,
+    )
+    snapshot = RoutingSnapshot(
+        active_chat_ids={100},
+        routes={100: [_route(100, "cat-1", "jobs")]},
+        total_bindings=1,
+    )
+    message = IncomingMessage(
+        chat_id=100,
+        message_id=4,
+        date=datetime.now(timezone.utc),
+        text="hello",
+        raw_meta={},
+    )
+
+    await process.handle(message, snapshot)
+
+    assert notifier.messages
+    assert "Категория: jobs" in notifier.messages[0]
+    assert "Retry через: 21с" in notifier.messages[0]
