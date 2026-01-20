@@ -11,6 +11,12 @@
 - Support: add admin notifications for LLM quota/rate limits + tests
 - Support: notify admins about LLM quota/rate limit errors in collector (admin broadcast + retry/cooldown info)
 - Infra: install pytest in local venv and run test suite
+- Review: project walkthrough (architecture, build/run, docs, structure)
+- Support: clarify LLM quota behavior (no retry, messages stored)
+- QA: add tests for prefilter/cooldown/error paths in message processing
+- QA: add collector service tests for event dispatch and skipping invalid events
+- QA: add test for skip when no routes in routing snapshot
+- Support: confirm routing refresh log is normal
 - Ops: systemd unit template + deploy script + workflow update + env diagnostics + README deploy notes
 - Ops: bootstrap git pull before deploy script in workflow
 - Docs: обновлены инструкции README по запуску и Telethon авторизации

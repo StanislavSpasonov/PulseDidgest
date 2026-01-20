@@ -64,12 +64,13 @@ class FakeNotifier:
 
 
 class FakeCooldown:
-    def __init__(self, remaining: int = 0) -> None:
+    def __init__(self, remaining: int = 0, in_cooldown: bool = False) -> None:
         self.remaining = remaining
         self.activated = False
+        self._in_cooldown = in_cooldown
 
     def in_cooldown(self) -> bool:
-        return False
+        return self._in_cooldown
 
     def activate(self) -> None:
         self.activated = True
@@ -154,6 +155,31 @@ async def test_process_incoming_message_skips_inactive_chat() -> None:
     assert repo.ensured == []
     assert repo.saved == []
 
+
+@pytest.mark.asyncio
+async def test_process_incoming_message_skips_when_no_routes() -> None:
+    repo = FakeRepo()
+    store_use_case = StoreMessageAndDecisionUseCase(repo)
+    filter_use_case = FakeFilterUseCase([])
+    process = ProcessIncomingMessageUseCase(filter_use_case, store_use_case)
+    snapshot = RoutingSnapshot(
+        active_chat_ids={100},
+        routes={},
+        total_bindings=0,
+    )
+    message = IncomingMessage(
+        chat_id=100,
+        message_id=8,
+        date=datetime.now(timezone.utc),
+        text="hello",
+        raw_meta={},
+    )
+
+    await process.handle(message, snapshot)
+
+    assert filter_use_case.calls == []
+    assert repo.ensured == []
+    assert repo.saved == []
 
 @pytest.mark.asyncio
 async def test_process_incoming_message_calls_llm_for_each_route() -> None:
@@ -314,3 +340,90 @@ async def test_process_incoming_message_notifies_admin_on_rate_limit_error() -> 
     assert notifier.messages
     assert "Категория: jobs" in notifier.messages[0]
     assert "Retry через: 21с" in notifier.messages[0]
+
+
+@pytest.mark.asyncio
+async def test_process_incoming_message_prefilter_skip_still_ensures_message() -> None:
+    repo = FakeRepo()
+    store_use_case = StoreMessageAndDecisionUseCase(repo)
+    filter_use_case = FakeFilterUseCase([])
+    route = replace(
+        _route(100, "cat-1", "jobs"),
+        prefilter=PrefilterRule(min_length=10),
+    )
+    process = ProcessIncomingMessageUseCase(filter_use_case, store_use_case)
+    snapshot = RoutingSnapshot(
+        active_chat_ids={100},
+        routes={100: [route]},
+        total_bindings=1,
+    )
+    message = IncomingMessage(
+        chat_id=100,
+        message_id=5,
+        date=datetime.now(timezone.utc),
+        text="hi",
+        raw_meta={},
+    )
+
+    await process.handle(message, snapshot)
+
+    assert filter_use_case.calls == []
+    assert len(repo.ensured) == 1
+    assert repo.saved == []
+
+
+@pytest.mark.asyncio
+async def test_process_incoming_message_cooldown_skips_llm() -> None:
+    repo = FakeRepo()
+    store_use_case = StoreMessageAndDecisionUseCase(repo)
+    filter_use_case = FakeFilterUseCase([])
+    cooldown = FakeCooldown(remaining=600, in_cooldown=True)
+    process = ProcessIncomingMessageUseCase(
+        filter_use_case,
+        store_use_case,
+        cooldown=cooldown,
+    )
+    snapshot = RoutingSnapshot(
+        active_chat_ids={100},
+        routes={100: [_route(100, "cat-1", "jobs")]},
+        total_bindings=1,
+    )
+    message = IncomingMessage(
+        chat_id=100,
+        message_id=6,
+        date=datetime.now(timezone.utc),
+        text="hello",
+        raw_meta={},
+    )
+
+    await process.handle(message, snapshot)
+
+    assert filter_use_case.calls == []
+    assert len(repo.ensured) == 1
+    assert repo.saved == []
+
+
+@pytest.mark.asyncio
+async def test_process_incoming_message_records_llm_error() -> None:
+    repo = FakeRepo()
+    store_use_case = StoreMessageAndDecisionUseCase(repo)
+    error = RuntimeError("LLM crashed")
+    filter_use_case = FakeFailingFilterUseCase(error=error, calls=[])
+    process = ProcessIncomingMessageUseCase(filter_use_case, store_use_case)
+    snapshot = RoutingSnapshot(
+        active_chat_ids={100},
+        routes={100: [_route(100, "cat-1", "jobs")]},
+        total_bindings=1,
+    )
+    message = IncomingMessage(
+        chat_id=100,
+        message_id=7,
+        date=datetime.now(timezone.utc),
+        text="hello",
+        raw_meta={},
+    )
+
+    await process.handle(message, snapshot)
+
+    assert repo.errors
+    assert repo.errors[0][1] == "cat-1"
